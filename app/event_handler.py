@@ -1,5 +1,6 @@
 """事件订阅处理 - 支持多步骤卡片交互"""
 import json
+import asyncio
 from typing import Dict, Any, Optional
 
 from app.services.keyword_matcher import match_keywords
@@ -14,7 +15,7 @@ class EventHandler:
     """处理飞书事件"""
     
     def __init__(self):
-        pass  # 去重改用 SQLite，不再用内存 Set
+        pass
     
     async def handle_message_event(self, event: Dict[str, Any]):
         """
@@ -40,7 +41,6 @@ class EventHandler:
             print(f"[EVENT] msg_id={message_id}, chat={chat_id}, type={message_type}, sender={sender_id}", flush=True)
             
             # 消息去重 - 使用 SQLite 持久化（重启后也能去重）
-            # 注意：这里只检查消息是否已经开始处理，具体的文件去重在下面的循环中进行
             if await state_manager.is_message_processed(message_id):
                 print(f"[EVENT] 消息已在处理中，检查是否有新文件: {message_id}", flush=True)
             await state_manager.mark_message_processed(message_id)
@@ -226,6 +226,15 @@ class EventHandler:
             return False
         return operator_id == confirmation.get("sender_id", "")
     
+    async def _get_operator_name(self, operator_id: str) -> str:
+        """获取操作人名称"""
+        try:
+            operator_info = await lark_client.get_user_info(operator_id)
+            return operator_info.get("name", "未知用户")
+        except Exception as e:
+            print(f"[CARD] 获取操作人名称失败: {e}", flush=True)
+            return "未知用户"
+    
     async def _handle_browse_folders(self, value: Dict, operator_id: str, callback: Dict):
         """处理浏览子文件夹"""
         file_key = value.get("file_key", "")
@@ -238,7 +247,8 @@ class EventHandler:
         # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[BROWSE] 权限不足: operator={operator_id}", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_name = await self._get_operator_name(operator_id)
+            return card_builder.build_no_permission_card(operator_name)
         
         # 获取子文件夹列表
         subfolders = await lark_client.list_folder_children(folder_token)
@@ -294,7 +304,8 @@ class EventHandler:
         # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[SELECT] 权限不足: operator={operator_id}", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_name = await self._get_operator_name(operator_id)
+            return card_builder.build_no_permission_card(operator_name)
         
         # 检查选中的文件夹是否还有子文件夹
         subfolders = await lark_client.list_folder_children(folder_token)
@@ -333,11 +344,13 @@ class EventHandler:
             return card_builder.build_selected_card(file_name, folder_name)
     
     async def _handle_confirm_upload(self, value: Dict, operator_id: str, callback: Dict):
-        """处理确认上传（从文件检测卡片直接上传到根目录）"""
+        """处理确认上传（从文件检测卡片直接上传到根目录或选定的文件夹）"""
         # 校验操作人
         message_id = value.get("message_id", "")
-        if not await self._check_sender_permission(message_id, operator_id):
-            return card_builder.build_no_permission_card()
+        if message_id and not await self._check_sender_permission(message_id, operator_id):
+            print(f"[CONFIRM] 权限不足: operator={operator_id}", flush=True)
+            operator_name = await self._get_operator_name(operator_id)
+            return card_builder.build_no_permission_card(operator_name)
         
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
@@ -378,7 +391,8 @@ class EventHandler:
         
         if not is_permitted:
             print(f"[UPLOAD] 权限不足", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_name = await self._get_operator_name(operator_id)
+            return card_builder.build_no_permission_card(operator_name)
         
         # 获取确认记录
         confirmation = await state_manager.get_confirmation(message_id)
@@ -398,9 +412,7 @@ class EventHandler:
         source_message_id = confirmation.get("source_message_id", message_id)
         print(f"[UPLOAD] 源消息ID: {source_message_id}", flush=True)
         
-        # 返回上传中卡片（更新原卡片）
-        # 同时启动后台任务执行实际上传
-        import asyncio
+        # 先启动后台任务执行实际上传
         asyncio.create_task(self._do_upload_background(
             chat_id=chat_id,
             message_id=message_id,
@@ -411,6 +423,7 @@ class EventHandler:
             operator_id=operator_id
         ))
         
+        # 返回上传中卡片（更新原卡片）
         return card_builder.build_uploading_card(file_name)
     
     async def _do_upload_background(
@@ -495,12 +508,15 @@ class EventHandler:
         # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[GO_BACK] 权限不足: operator={operator_id}", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_name = await self._get_operator_name(operator_id)
+            return card_builder.build_no_permission_card(operator_name)
         
-        # 获取子文件夹列表
+        # 获取目标文件夹的子文件夹列表
         subfolders = await lark_client.list_folder_children(folder_token)
+        print(f"[GO_BACK] 返回到文件夹: {folder_name}, 子文件夹: {subfolders}", flush=True)
         
         if subfolders:
+            # 有子文件夹，显示子文件夹列表
             return card_builder.build_folder_list_card(
                 file_name=file_name,
                 file_key=file_key,
@@ -511,7 +527,7 @@ class EventHandler:
                 sender_name=sender_name
             )
         else:
-            # 回到根目录，显示文件检测卡片
+            # 没有子文件夹，显示文件检测卡片（允许直接上传到根目录）
             return card_builder.build_file_detected_card(
                 file_name=file_name,
                 folder_name=folder_name,
@@ -532,7 +548,8 @@ class EventHandler:
             is_permitted = await self._check_sender_permission(message_id, operator_id)
             if not is_permitted:
                 print(f"[CANCEL] 权限不足: operator={operator_id}", flush=True)
-                return card_builder.build_no_permission_card()
+                operator_name = await self._get_operator_name(operator_id)
+                return card_builder.build_no_permission_card(operator_name)
             
             # 检查是否已经完成上传
             confirmation = await state_manager.get_confirmation(message_id)

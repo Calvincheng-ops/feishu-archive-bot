@@ -102,8 +102,25 @@ class CardBuilder:
         步骤2: 子文件夹列表卡片
         
         显示子文件夹供用户选择
+        增加"上传到当前文件夹"按钮
         """
         actions = []
+        
+        # 添加"上传到当前文件夹"按钮
+        actions.append({
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": f"⬆️ 上传到「{parent_folder_name}」"},
+            "type": "primary",
+            "value": {
+                "action": "confirm_upload",
+                "file_key": file_key,
+                "folder_token": parent_folder_token,
+                "folder_name": parent_folder_name,
+                "message_id": message_id,
+                "file_name": file_name
+            }
+        })
+        
         for folder in folders[:10]:  # 最多显示10个
             actions.append({
                 "tag": "button",
@@ -405,8 +422,18 @@ class CardBuilder:
         }
     
     @staticmethod
-    def build_no_permission_card() -> Dict[str, Any]:
-        """无权限操作卡片"""
+    def build_no_permission_card(operator_name: str = None) -> Dict[str, Any]:
+        """
+        无权限操作卡片
+        
+        Args:
+            operator_name: 操作人名称（可选，如果提供则显示谁没有权限）
+        """
+        if operator_name:
+            content = f"**{operator_name}**，你没有权限执行此操作。\n\n只有发送文件指令的人才能执行此操作。"
+        else:
+            content = "只有发送文件指令的人才能执行此操作。"
+        
         return {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -418,7 +445,7 @@ class CardBuilder:
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": "只有发送文件指令的人才能执行此操作。"
+                        "content": content
                     }
                 }
             ]
