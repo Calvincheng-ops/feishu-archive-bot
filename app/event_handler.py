@@ -238,7 +238,9 @@ class EventHandler:
         # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[BROWSE] 权限不足: operator={operator_id}", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_info = await lark_client.get_user_info(operator_id)
+            operator_name = operator_info.get("name", "未知用户")
+            return card_builder.build_no_permission_card(operator_name)
         
         # 获取子文件夹列表
         subfolders = await lark_client.list_folder_children(folder_token)
@@ -294,7 +296,9 @@ class EventHandler:
         # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[SELECT] 权限不足: operator={operator_id}", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_info = await lark_client.get_user_info(operator_id)
+            operator_name = operator_info.get("name", "未知用户")
+            return card_builder.build_no_permission_card(operator_name)
         
         # 检查选中的文件夹是否还有子文件夹
         subfolders = await lark_client.list_folder_children(folder_token)
@@ -337,7 +341,9 @@ class EventHandler:
         # 校验操作人
         message_id = value.get("message_id", "")
         if not await self._check_sender_permission(message_id, operator_id):
-            return card_builder.build_no_permission_card()
+            operator_info = await lark_client.get_user_info(operator_id)
+            operator_name = operator_info.get("name", "未知用户")
+            return card_builder.build_no_permission_card(operator_name)
         
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
@@ -378,7 +384,9 @@ class EventHandler:
         
         if not is_permitted:
             print(f"[UPLOAD] 权限不足", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_info = await lark_client.get_user_info(operator_id)
+            operator_name = operator_info.get("name", "未知用户")
+            return card_builder.build_no_permission_card(operator_name)
         
         # 获取确认记录
         confirmation = await state_manager.get_confirmation(message_id)
@@ -495,7 +503,9 @@ class EventHandler:
         # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[GO_BACK] 权限不足: operator={operator_id}", flush=True)
-            return card_builder.build_no_permission_card()
+            operator_info = await lark_client.get_user_info(operator_id)
+            operator_name = operator_info.get("name", "未知用户")
+            return card_builder.build_no_permission_card(operator_name)
         
         # 获取子文件夹列表
         subfolders = await lark_client.list_folder_children(folder_token)
@@ -532,7 +542,9 @@ class EventHandler:
             is_permitted = await self._check_sender_permission(message_id, operator_id)
             if not is_permitted:
                 print(f"[CANCEL] 权限不足: operator={operator_id}", flush=True)
-                return card_builder.build_no_permission_card()
+                operator_info = await lark_client.get_user_info(operator_id)
+                operator_name = operator_info.get("name", "未知用户")
+                return card_builder.build_no_permission_card(operator_name)
             
             # 检查是否已经完成上传
             confirmation = await state_manager.get_confirmation(message_id)

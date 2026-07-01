@@ -405,8 +405,18 @@ class CardBuilder:
         }
     
     @staticmethod
-    def build_no_permission_card() -> Dict[str, Any]:
-        """无权限操作卡片"""
+    def build_no_permission_card(operator_name: str = None) -> Dict[str, Any]:
+        """
+        无权限操作卡片
+        
+        Args:
+            operator_name: 操作人名称（可选，如果提供则显示谁没有权限）
+        """
+        if operator_name:
+            content = f"**{operator_name}**，你没有权限执行此操作。\n\n只有发送文件指令的人才能执行此操作。"
+        else:
+            content = "只有发送文件指令的人才能执行此操作。"
+        
         return {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -418,7 +428,7 @@ class CardBuilder:
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": "只有发送文件指令的人才能执行此操作。"
+                        "content": content
                     }
                 }
             ]
