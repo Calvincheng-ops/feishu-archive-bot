@@ -87,6 +87,18 @@ cp .env.example .env
 # 编辑 .env 文件，填入飞书应用凭证
 ```
 
+最少需要配置：
+
+```bash
+BOT_APP_ID=cli_xxx
+BOT_APP_SECRET=xxx
+ENCRYPT_KEY=xxx
+VERIFICATION_TOKEN=xxx
+ARCHIVE_CHAT_ID=oc_xxx
+ARCHIVE_FOLDER_TOKEN=fldcnxxx
+ARCHIVE_FOLDER_NAME=归档文件夹
+```
+
 ### 3. 飞书应用配置
 
 #### 3.1 创建应用
@@ -111,12 +123,12 @@ cp .env.example .env
 
 | 权限 | 说明 |
 |------|------|
-| `im:message` | 接收消息 |
-| `im:message:send_as_bot` | 发送消息 |
+| `im:message.group_at_msg:readonly` | 接收群聊中 @ 机器人的消息 |
+| `im:message` | 发送消息/卡片 |
 | `im:resource` | 下载资源文件 |
-| `im:chat:readonly` | 读取群信息 |
-| `drive:drive` | 云盘文件操作 |
-| `drive:file` | 文件上传 |
+| `im:chat:read` | 读取群信息 |
+| `space:document:retrieve` | 列出目标文件夹下的子文件夹 |
+| `drive:file:upload` | 上传文件 |
 | `contact:user.base:readonly` | 获取用户信息 |
 
 #### 3.5 配置可用范围
@@ -190,17 +202,15 @@ docker-compose logs -f
 
 ## ⚙️ 映射配置
 
-### 方式一：硬编码（测试用）
+### 方式一：环境变量（测试用）
 
-在 `app/main.py` 的 `lifespan` 函数中添加：
+在 `.env` 中配置：
 
-```python
-mapping_service.add_hardcoded_mapping(
-    chat_id="oc_xxx",           # 群 ID
-    chat_name="测试群",          # 群名称
-    folder_token="fldcnxxx",    # 云盘文件夹 token
-    folder_name="测试文件夹"     # 文件夹名称
-)
+```bash
+ARCHIVE_CHAT_ID=oc_xxx
+ARCHIVE_CHAT_NAME=测试群
+ARCHIVE_FOLDER_TOKEN=fldcnxxx
+ARCHIVE_FOLDER_NAME=测试文件夹
 ```
 
 ### 方式二：多维表格（生产推荐）
@@ -208,6 +218,8 @@ mapping_service.add_hardcoded_mapping(
 1. 创建飞书多维表格
 2. 配置字段：`chat_id`, `chat_name`, `folder_token`, `folder_name`, `enabled`
 3. 在 `.env` 中配置 `BITABLE_APP_TOKEN` 和 `BITABLE_TABLE_ID`
+
+> 注意：多维表格动态读取目前仍是预留能力，当前可运行路径是环境变量映射。
 
 ## 🔌 API 接口
 

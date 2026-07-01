@@ -43,7 +43,8 @@ class FileTransferService:
         """
         # 创建临时目录
         with tempfile.TemporaryDirectory() as temp_dir:
-            local_path = os.path.join(temp_dir, file_name)
+            safe_file_name = os.path.basename(file_name) or "archive_file"
+            local_path = os.path.join(temp_dir, safe_file_name)
             
             try:
                 # 1. 下载附件
