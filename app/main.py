@@ -172,6 +172,12 @@ async def handle_card_callback(request: Request):
         # 获取更新后的卡片
         updated_card = await event_handler.handle_card_callback(callback)
         
+        # 添加调试日志
+        if updated_card:
+            print(f"[CARD] 返回更新卡片: {json.dumps(updated_card, ensure_ascii=False)[:200]}...", flush=True)
+        else:
+            print(f"[CARD] 返回空响应（不更新卡片）", flush=True)
+        
         # 返回更新后的卡片（飞书会用这个卡片更新原卡片）
         if updated_card:
             return JSONResponse(updated_card)

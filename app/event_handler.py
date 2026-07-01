@@ -14,7 +14,7 @@ class EventHandler:
     """处理飞书事件"""
     
     def __init__(self):
-        self._processed_messages = set()  # 消息去重
+        pass  # 去重改用 SQLite，不再用内存 Set
     
     async def handle_message_event(self, event: Dict[str, Any]):
         """
@@ -39,11 +39,11 @@ class EventHandler:
             
             print(f"[EVENT] msg_id={message_id}, chat={chat_id}, type={message_type}, sender={sender_id}", flush=True)
             
-            # 消息去重 - 飞书可能会重发事件
-            if message_id in self._processed_messages:
-                print(f"[EVENT] 重复消息，跳过: {message_id}", flush=True)
-                return
-            self._processed_messages.add(message_id)
+            # 消息去重 - 使用 SQLite 持久化（重启后也能去重）
+            # 注意：这里只检查消息是否已经开始处理，具体的文件去重在下面的循环中进行
+            if await state_manager.is_message_processed(message_id):
+                print(f"[EVENT] 消息已在处理中，检查是否有新文件: {message_id}", flush=True)
+            await state_manager.mark_message_processed(message_id)
             
             # 只处理群聊消息
             if chat_type != "group":
@@ -132,6 +132,11 @@ class EventHandler:
             
             # 对每个文件发送选择卡片
             for file_info in files:
+                # 检查文件是否已经在处理中（防止重复上传）
+                if await state_manager.is_file_pending(message_id, file_info.file_key):
+                    print(f"[EVENT] 文件已在处理中，跳过: {file_info.file_name}", flush=True)
+                    continue
+                
                 # 创建确认记录（保存发送人信息，用于后续校验）
                 await state_manager.create_confirmation(
                     message_id=message_id,
@@ -240,8 +245,8 @@ class EventHandler:
         print(f"[BROWSE] 子文件夹列表: {subfolders}", flush=True)
         
         if not subfolders:
-            # 没有子文件夹，提示上传到根目录
-            return card_builder.build_confirm_upload_card(
+            # 没有子文件夹，发送确认卡片（新卡片）
+            confirm_card = card_builder.build_confirm_upload_card(
                 file_name=file_name,
                 folder_name="根目录",
                 parent_folder_name="",
@@ -250,12 +255,17 @@ class EventHandler:
                 folder_token=folder_token,
                 message_id=message_id
             )
+            if chat_id:
+                await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
+            
+            # 更新原卡片为"已选择文件夹"状态
+            return card_builder.build_selected_card(file_name, "根目录")
         else:
-            # 有子文件夹，显示子文件夹列表
+            # 有子文件夹，发送子文件夹列表卡片（新卡片）
             mapping = await mapping_service.get_folder_mapping(chat_id)
             parent_name = mapping.folder_name if mapping else "归档文件夹"
             
-            return card_builder.build_folder_list_card(
+            folder_list_card = card_builder.build_folder_list_card(
                 file_name=file_name,
                 file_key=file_key,
                 message_id=message_id,
@@ -264,6 +274,11 @@ class EventHandler:
                 folders=subfolders,
                 sender_name=sender_name
             )
+            if chat_id:
+                await lark_client.send_card(chat_id=chat_id, card_json=folder_list_card)
+            
+            # 更新原卡片为"已查看子文件夹"状态（无按钮）
+            return card_builder.build_browse_done_card(file_name, parent_name)
     
     async def _handle_select_folder(self, value: Dict, operator_id: str, callback: Dict):
         """处理选择子文件夹"""
@@ -285,8 +300,8 @@ class EventHandler:
         subfolders = await lark_client.list_folder_children(folder_token)
         
         if subfolders:
-            # 还有子文件夹，继续展示列表
-            return card_builder.build_folder_list_card(
+            # 还有子文件夹，发送新的子文件夹列表卡片
+            new_folder_card = card_builder.build_folder_list_card(
                 file_name=file_name,
                 file_key=file_key,
                 message_id=message_id,
@@ -295,9 +310,14 @@ class EventHandler:
                 folders=subfolders,
                 sender_name=sender_name
             )
+            if chat_id:
+                await lark_client.send_card(chat_id=chat_id, card_json=new_folder_card)
+            
+            # 更新原卡片为"已选择文件夹"状态（无按钮）
+            return card_builder.build_selected_card(file_name, folder_name)
         else:
-            # 没有子文件夹了，显示确认卡片
-            return card_builder.build_confirm_upload_card(
+            # 没有子文件夹了，发送确认卡片（新卡片）
+            confirm_card = card_builder.build_confirm_upload_card(
                 file_name=file_name,
                 folder_name=folder_name,
                 parent_folder_name=parent_folder_name,
@@ -306,9 +326,11 @@ class EventHandler:
                 folder_token=folder_token,
                 message_id=message_id
             )
-        
-        if chat_id:
-            await lark_client.send_card(chat_id=chat_id, card_json=card_json)
+            if chat_id:
+                await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
+            
+            # 更新原卡片为"已选择文件夹"状态（无按钮）
+            return card_builder.build_selected_card(file_name, folder_name)
     
     async def _handle_confirm_upload(self, value: Dict, operator_id: str, callback: Dict):
         """处理确认上传（从文件检测卡片直接上传到根目录）"""
@@ -427,6 +449,7 @@ class EventHandler:
                     # 获取文件夹名称
                     mapping = await mapping_service.get_folder_mapping(chat_id)
                     folder_display_name = mapping.folder_name if mapping else "归档文件夹"
+                    print(f"[UPLOAD] 文件夹显示名称: {folder_display_name}, chat_id={chat_id}", flush=True)
                     
                     await lark_client.send_card(
                         chat_id=chat_id,

@@ -53,6 +53,44 @@ class StateManager:
             
             await db.commit()
     
+    async def is_message_processed(self, message_id: str, file_key: str = None) -> bool:
+        """
+        检查消息是否已处理过（用于去重）
+        
+        Args:
+            message_id: 消息 ID
+            file_key: 文件 key（可选，如果提供则检查具体的文件）
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            if file_key:
+                # 检查具体的文件是否已处理
+                cursor = await db.execute(
+                    "SELECT 1 FROM confirmations WHERE message_id = ? AND file_key = ? LIMIT 1",
+                    (message_id, file_key)
+                )
+            else:
+                # 检查消息是否已经开始处理（任意文件）
+                cursor = await db.execute(
+                    "SELECT 1 FROM confirmations WHERE message_id = ? LIMIT 1",
+                    (message_id,)
+                )
+            row = await cursor.fetchone()
+            return row is not None
+    
+    async def mark_message_processed(self, message_id: str):
+        """标记消息已处理（用于去重，实际由 create_confirmation 完成）"""
+        pass  # create_confirmation 时已自动记录
+    
+    async def is_file_pending(self, message_id: str, file_key: str) -> bool:
+        """检查文件是否已经在处理中（防止重复上传）"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM confirmations WHERE message_id = ? AND file_key = ? AND status IN ('pending', 'confirmed')",
+                (message_id, file_key)
+            )
+            row = await cursor.fetchone()
+            return row is not None
+    
     async def create_confirmation(
         self,
         message_id: str,
