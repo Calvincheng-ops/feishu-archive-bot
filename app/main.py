@@ -1,0 +1,222 @@
+"""飞书群文件自动归档机器人 - FastAPI 入口"""
+import json
+import hashlib
+import base64
+from typing import Dict, Any
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+
+from app.config import settings
+from app.event_handler import event_handler
+from app.services.state_manager import state_manager
+from app.services.mapping_service import mapping_service
+
+from Crypto.Cipher import AES
+
+
+def decrypt_event(encrypted_data: str, encrypt_key: str) -> dict:
+    """解密飞书加密事件"""
+    key = hashlib.sha256(encrypt_key.encode('utf-8')).digest()
+    decoded = base64.b64decode(encrypted_data)
+    iv = decoded[:16]
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    decrypted = cipher.decrypt(decoded[16:])
+    # 去除 PKCS7 padding
+    pad_len = decrypted[-1]
+    decrypted = decrypted[:-pad_len]
+    return json.loads(decrypted.decode('utf-8'))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时初始化
+    print("正在初始化应用...")
+    await state_manager.init_db()
+    print("数据库初始化完成")
+    
+    # 添加测试映射
+    mapping_service.add_hardcoded_mapping(
+        chat_id="oc_ef1aa1409f9068ff12c892a42f32e73d",
+        chat_name="文件归档测试",
+        folder_token="PPb3f4FwTl6hmJd95UXc4H7anDf",
+        folder_name="归档文件夹"
+    )
+    
+    print("应用初始化完成")
+    yield
+    print("应用关闭")
+
+
+# 创建 FastAPI 应用
+app = FastAPI(
+    title="飞书群文件自动归档机器人",
+    description="当群成员 @机器人并发送含 final 版本等关键词的带附件消息时，自动归档到云盘",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+
+@app.get("/")
+async def root():
+    """根路径"""
+    return {
+        "name": "飞书群文件自动归档机器人",
+        "version": "1.0.0",
+        "status": "running"
+    }
+
+
+@app.get("/health")
+async def health():
+    """健康检查"""
+    return {
+        "status": "ok",
+        "version": "1.0.0"
+    }
+
+
+@app.post("/api/events")
+async def handle_events(request: Request):
+    """
+    处理飞书事件回调
+    
+    飞书会发送两种类型的请求：
+    1. URL 验证请求（包含 challenge）
+    2. 事件推送请求
+    """
+    try:
+        body = await request.json()
+        
+        # 调试日志
+        print(f"[EVENT] 收到请求: {list(body.keys())}", flush=True)
+        
+        # 处理加密事件
+        if "encrypt" in body:
+            print(f"[EVENT] 解密事件...", flush=True)
+            body = decrypt_event(body["encrypt"], settings.encrypt_key)
+            print(f"[EVENT] 解密完成: {list(body.keys())}", flush=True)
+        
+        # URL 验证
+        if "challenge" in body:
+            print(f"[EVENT] URL验证 challenge", flush=True)
+            return JSONResponse({
+                "challenge": body["challenge"]
+            })
+        
+        # 获取事件类型
+        schema = body.get("schema", "")
+        header = body.get("header", {})
+        event_type = header.get("event_type", "")
+        event = body.get("event", {})
+        
+        print(f"[EVENT] 事件类型: {event_type}", flush=True)
+        
+        # 根据事件类型分发处理
+        if event_type == "im.message.receive_v1":
+            # 消息接收事件
+            print(f"[EVENT] 处理消息事件...", flush=True)
+            await event_handler.handle_message_event(event)
+            print(f"[EVENT] 消息事件处理完成", flush=True)
+        elif event_type == "card.action.trigger":
+            # 卡片回调事件 - 需要返回更新后的卡片
+            updated_card = await event_handler.handle_card_callback(event)
+            if updated_card:
+                return JSONResponse(updated_card)
+        
+        return JSONResponse({"code": 0})
+        
+    except Exception as e:
+        print(f"处理事件失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"code": 0})  # 返回 0 避免飞书重试
+
+
+@app.post("/api/card/callback")
+async def handle_card_callback(request: Request):
+    """
+    处理卡片回调（直接回调格式）
+    
+    飞书卡片按钮点击会发送到这个端点
+    需要处理 challenge 验证请求
+    """
+    try:
+        body = await request.json()
+        
+        print(f"[CARD] 收到卡片回调: {list(body.keys())}", flush=True)
+        
+        # 处理加密
+        if "encrypt" in body:
+            body = decrypt_event(body["encrypt"], settings.encrypt_key)
+            print(f"[CARD] 解密后完整数据: {json.dumps(body, ensure_ascii=False)}", flush=True)
+        
+        # URL 验证（challenge）
+        if "challenge" in body:
+            print(f"[CARD] URL验证 challenge", flush=True)
+            return JSONResponse({"challenge": body["challenge"]})
+        
+        # 转换为统一格式 - 适配 card.action.trigger 事件格式
+        event_data = body.get("event", {})
+        callback = {
+            "action": event_data.get("action", body.get("action", {})),
+            "operator": event_data.get("operator", body.get("operator", {})),
+            "open_chat_id": event_data.get("context", {}).get("open_chat_id", body.get("open_chat_id", "")),
+            "context": event_data.get("context", body.get("context", {}))
+        }
+        
+        print(f"[CARD] action={callback['action'].get('value', {}).get('action', '')}, operator={callback['operator'].get('open_id', '')}", flush=True)
+        
+        # 获取更新后的卡片
+        updated_card = await event_handler.handle_card_callback(callback)
+        
+        # 返回更新后的卡片（飞书会用这个卡片更新原卡片）
+        if updated_card:
+            return JSONResponse(updated_card)
+        
+        # 返回空响应表示不更新卡片
+        return JSONResponse({})
+        
+    except Exception as e:
+        print(f"[CARD] 处理卡片回调失败: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"code": 0})
+
+
+@app.get("/api/logs")
+async def get_logs(limit: int = 100):
+    """获取操作日志"""
+    logs = await state_manager.get_recent_logs(limit)
+    return {"logs": logs}
+
+
+@app.get("/api/mappings")
+async def get_mappings():
+    """获取所有映射配置"""
+    mappings = await mapping_service.get_all_mappings()
+    return {
+        "mappings": [
+            {
+                "chat_id": m.chat_id,
+                "chat_name": m.chat_name,
+                "folder_token": m.folder_token,
+                "folder_name": m.folder_name,
+                "enabled": m.enabled
+            }
+            for m in mappings
+        ]
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level=settings.log_level.lower()
+    )
