@@ -2,10 +2,9 @@
 import json
 import hashlib
 import base64
-from typing import Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -28,6 +27,19 @@ def decrypt_event(encrypted_data: str, encrypt_key: str) -> dict:
     return json.loads(decrypted.decode('utf-8'))
 
 
+def verify_callback_token(body: dict) -> bool:
+    """Validate Feishu verification token when configured."""
+    if not settings.verification_token:
+        return True
+
+    candidates = [
+        body.get("token"),
+        body.get("header", {}).get("token"),
+        body.get("event", {}).get("token"),
+    ]
+    return settings.verification_token in candidates
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -35,12 +47,13 @@ async def lifespan(app: FastAPI):
     await state_manager.init_db()
     print("数据库初始化完成")
 
-    mapping_service.add_hardcoded_mapping(
-        chat_id="oc_ef1aa1409f9068ff12c892a42f32e73d",
-        chat_name="文件归档测试",
-        folder_token="PPb3f4FwTl6hmJd95UXc4H7anDf",
-        folder_name="归档文件夹"
-    )
+    if settings.archive_chat_id and settings.archive_folder_token:
+        mapping_service.add_hardcoded_mapping(
+            chat_id=settings.archive_chat_id,
+            chat_name=settings.archive_chat_name or settings.archive_chat_id,
+            folder_token=settings.archive_folder_token,
+            folder_name=settings.archive_folder_name
+        )
 
     print("应用初始化完成")
     yield
@@ -84,6 +97,10 @@ async def handle_events(request: Request):
             print(f"[EVENT] 解密事件...", flush=True)
             body = decrypt_event(body["encrypt"], settings.encrypt_key)
             print(f"[EVENT] 解密完成: {list(body.keys())}", flush=True)
+
+        if not verify_callback_token(body):
+            print("[EVENT] verification token mismatch", flush=True)
+            return JSONResponse({"code": 403, "msg": "invalid token"}, status_code=403)
 
         if "challenge" in body:
             print(f"[EVENT] URL验证 challenge", flush=True)
@@ -133,7 +150,11 @@ async def handle_card_callback(request: Request):
 
         if "encrypt" in body:
             body = decrypt_event(body["encrypt"], settings.encrypt_key)
-            print(f"[CARD] 解密后完整数据: {json.dumps(body, ensure_ascii=False)}", flush=True)
+            print(f"[CARD] 解密完成: {list(body.keys())}", flush=True)
+
+        if not verify_callback_token(body):
+            print("[CARD] verification token mismatch", flush=True)
+            return JSONResponse({"code": 403, "msg": "invalid token"}, status_code=403)
 
         if "challenge" in body:
             print(f"[CARD] URL验证 challenge", flush=True)
