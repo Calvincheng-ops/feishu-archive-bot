@@ -120,16 +120,9 @@ async def handle_events(request: Request):
             print(f"[EVENT] 消息事件处理完成", flush=True)
 
         elif event_type == "card.action.trigger":
-            # 标准化为统一的 callback dict 格式（与 /api/card/callback 一致）
-            callback = {
-                "action": event.get("action", {}),
-                "operator": event.get("operator", {}),
-                "open_chat_id": event.get("context", {}).get("open_chat_id", ""),
-                "context": event.get("context", {})
-            }
-            updated_card = await event_handler.handle_card_callback(callback)
-            if updated_card:
-                return JSONResponse(updated_card)
+            # 卡片回调事件 - 忽略，由 /api/card/callback 处理
+            print(f"[EVENT] 卡片回调事件，忽略（由 /api/card/callback 处理）", flush=True)
+            return JSONResponse({"code": 0})
 
         return JSONResponse({"code": 0})
 
@@ -151,6 +144,11 @@ async def handle_card_callback(request: Request):
         if "encrypt" in body:
             body = decrypt_event(body["encrypt"], settings.encrypt_key)
             print(f"[CARD] 解密完成: {list(body.keys())}", flush=True)
+        else:
+            # 明文格式 - 直接返回空响应，不处理
+            # 明文格式的 open_id 不是真正的操作人，忽略
+            print(f"[CARD] 明文回调，忽略", flush=True)
+            return JSONResponse({})
 
         if not verify_callback_token(body):
             print("[CARD] verification token mismatch", flush=True)
@@ -162,15 +160,15 @@ async def handle_card_callback(request: Request):
 
         event_data = body.get("event", {})
         callback = {
-            "action": event_data.get("action", body.get("action", {})),
-            "operator": event_data.get("operator", body.get("operator", {})),
-            "open_chat_id": event_data.get("context", {}).get("open_chat_id", body.get("open_chat_id", "")),
-            "context": event_data.get("context", body.get("context", {}))
+            "action": event_data.get("action", {}),
+            "operator": event_data.get("operator", {}),
+            "open_chat_id": event_data.get("context", {}).get("open_chat_id", ""),
+            "context": event_data.get("context", {})
         }
 
         action_type = callback["action"].get("value", {}).get("action", "")
         operator = callback["operator"]
-        operator_id = operator.get("open_id", "") or operator.get("operator_id", {}).get("open_id", "")
+        operator_id = operator.get("open_id", "")
         print(f"[CARD] action={action_type}, operator_id={operator_id}", flush=True)
 
         updated_card = await event_handler.handle_card_callback(callback)
