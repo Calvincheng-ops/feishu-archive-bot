@@ -18,6 +18,7 @@ class EventHandler:
     def __init__(self):
         self._operator_name_cache: Dict[str, str] = {}  # open_id -> name cache
         self._callback_dedup: Dict[str, float] = {}  # dedup key -> timestamp
+        self._dedup_lock = asyncio.Lock()  # 原子化去重检查
 
     async def handle_message_event(self, event: Dict[str, Any]):
         try:
@@ -187,10 +188,12 @@ class EventHandler:
 
             print(f"[CARD] action={action_type}, operator_id={operator_id}, msg_id={message_id}", flush=True)
 
-            # 回调去重：同一 (message_id, action, operator) 5 秒内只处理一次
-            if message_id and action_type and operator_id:
-                dedup_key = f"{message_id}:{action_type}:{operator_id}"
-                if self._is_duplicate_callback(dedup_key):
+            # 回调去重：同一 (message_id, action) 5 秒内只处理一次
+            # 不包含 operator_id — 两个回调入口的 operator 格式可能不同，
+            # 导致同一个按钮点击在 /api/events 和 /api/card/callback 中产生不同 key
+            if message_id and action_type:
+                dedup_key = f"{message_id}:{action_type}"
+                if await self._check_and_mark_callback(dedup_key):
                     print(f"[DEDUP] 跳过重复回调: {dedup_key}", flush=True)
                     return None
 
@@ -235,20 +238,25 @@ class EventHandler:
 
     # ── 回调去重 ───────────────────────────────────────────────
 
-    def _is_duplicate_callback(self, dedup_key: str) -> bool:
-        """检查是否为 5 秒内的重复回调"""
-        now = time.time()
-        if dedup_key in self._callback_dedup:
-            if now - self._callback_dedup[dedup_key] < 5:
-                return True
-        self._callback_dedup[dedup_key] = now
-        # 定期清理过期条目
-        if len(self._callback_dedup) > 1000:
-            self._callback_dedup = {
-                k: v for k, v in self._callback_dedup.items()
-                if now - v < 10
-            }
-        return False
+    async def _check_and_mark_callback(self, dedup_key: str) -> bool:
+        """原子检查并标记回调去重（5 秒窗口）。
+
+        使用 asyncio.Lock 确保同一 key 的 check+set 是原子的，
+        防止并发的两个回调（/api/events 和 /api/card/callback）同时通过检查。
+        """
+        async with self._dedup_lock:
+            now = time.time()
+            if dedup_key in self._callback_dedup:
+                if now - self._callback_dedup[dedup_key] < 5:
+                    return True  # 重复
+            self._callback_dedup[dedup_key] = now
+            # 定期清理过期条目
+            if len(self._callback_dedup) > 1000:
+                self._callback_dedup = {
+                    k: v for k, v in self._callback_dedup.items()
+                    if now - v < 10
+                }
+            return False
 
     # ── 操作人姓名获取 ─────────────────────────────────────────
 
@@ -400,13 +408,14 @@ class EventHandler:
         folder_token = value.get("folder_token", "")
         folder_name = value.get("folder_name", "")
         file_name = value.get("file_name", "")
+        sender_name = value.get("sender_name", "")  # 从卡片 value 取发送人
         chat_id = self._get_chat_id_from_callback(callback)
 
         confirm_card = card_builder.build_confirm_upload_card(
             file_name=file_name,
             folder_name=folder_name,
             parent_folder_name="",
-            sender_name="",
+            sender_name=sender_name,
             file_key=file_key,
             folder_token=folder_token,
             message_id=message_id
@@ -421,6 +430,7 @@ class EventHandler:
         """执行文件上传"""
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
+        folder_name = value.get("folder_name", "")  # 选中的子文件夹名
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
@@ -458,6 +468,7 @@ class EventHandler:
             file_key=file_key,
             file_name=file_name,
             folder_token=folder_token,
+            folder_name=folder_name,
             operator_id=operator_id
         ))
 
@@ -471,6 +482,7 @@ class EventHandler:
         file_key: str,
         file_name: str,
         folder_token: str,
+        folder_name: str,
         operator_id: str
     ):
         """后台执行文件上传"""
@@ -495,21 +507,23 @@ class EventHandler:
                 )
 
                 if chat_id:
-                    mapping = await mapping_service.get_folder_mapping(chat_id)
-                    folder_display_name = mapping.folder_name if mapping else "归档文件夹"
-                    print(f"[UPLOAD] 文件夹显示名称: {folder_display_name}, chat_id={chat_id}", flush=True)
+                    # 使用用户选中的子文件夹名，而非根目录映射名
+                    display_folder = folder_name if folder_name else "归档文件夹"
+                    print(f"[UPLOAD] 文件夹显示名称: {display_folder}", flush=True)
 
-                    # 构造文件链接
+                    # 构造文件链接和文件夹链接
                     file_token = result.get("file_token", "")
                     file_url = lark_client.get_file_url(file_token) if file_token else ""
-                    print(f"[UPLOAD] 文件链接: {file_url}", flush=True)
+                    folder_url = lark_client.get_folder_url(folder_token) if folder_token else ""
+                    print(f"[UPLOAD] 文件链接: {file_url}, 文件夹链接: {folder_url}", flush=True)
 
                     await lark_client.send_card(
                         chat_id=chat_id,
                         card_json=card_builder.build_success_card(
                             file_name=file_name,
-                            folder_name=folder_display_name,
-                            file_url=file_url
+                            folder_name=display_folder,
+                            file_url=file_url,
+                            folder_url=folder_url
                         )
                     )
             else:

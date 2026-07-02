@@ -50,10 +50,11 @@ class CardBuilder:
                 "folder_token": folder_token,
                 "folder_name": folder_name,
                 "message_id": message_id,
-                "file_name": file_name
+                "file_name": file_name,
+                "sender_name": sender_name
             }
         })
-        
+
         actions.append({
             "tag": "button",
             "text": {"tag": "plain_text", "content": "❌ 取消"},
@@ -117,10 +118,11 @@ class CardBuilder:
                 "folder_token": parent_folder_token,
                 "folder_name": parent_folder_name,
                 "message_id": message_id,
-                "file_name": file_name
+                "file_name": file_name,
+                "sender_name": sender_name
             }
         })
-        
+
         for folder in folders[:10]:  # 最多显示10个
             actions.append({
                 "tag": "button",
@@ -263,13 +265,20 @@ class CardBuilder:
     def build_success_card(
         file_name: str,
         folder_name: str,
-        file_url: str = ""
+        file_url: str = "",
+        folder_url: str = ""
     ) -> Dict[str, Any]:
-        """上传成功卡片"""
-        content = f"✅ **文件上传成功**\n\n**文件名**：{file_name}\n**目标文件夹**：{folder_name}"
+        """上传成功卡片 — 显示文件名、目标文件夹、文件链接和文件夹链接"""
+        content = (
+            f"✅ **文件上传成功**\n\n"
+            f"**文件名**：{file_name}\n"
+            f"**目标文件夹**：{folder_name}"
+        )
         if file_url:
-            content += f"\n\n[点击查看文件]({file_url})"
-        
+            content += f"\n\n📎 [点击查看文件]({file_url})"
+        if folder_url:
+            content += f"\n📂 [打开目标文件夹]({folder_url})"
+
         return {
             "config": {"wide_screen_mode": True},
             "header": {

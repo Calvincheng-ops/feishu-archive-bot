@@ -227,23 +227,25 @@ class LarkClient:
         }
     
     def get_file_url(self, file_token: str) -> str:
-        """根据 file_token 构造飞书云盘文件链接
-
-        Args:
-            file_token: upload_all 返回的 file_token（以 box 开头）
-
-        Returns:
-            文件的可访问 URL，如 https://westoeast.feishu.cn/file/boxcnrHpsg1QDqXAAAyachabcef
-        """
+        """根据 file_token 构造飞书云盘文件链接"""
         if not file_token:
             return ""
-        # 从 app_id 推断租户域名（cli_xxx 格式的 app 对应企业域名）
-        # 默认使用 feishu.cn，用户可在 .env 中配置自定义域名
-        tenant_domain = getattr(settings, 'feishu_tenant_domain', None)
-        if not tenant_domain:
-            # 尝试从 SDK client 配置中获取，或使用默认值
-            tenant_domain = "bytedance.feishu.cn"
-        return f"https://{tenant_domain}/file/{file_token}"
+        domain = self._get_tenant_domain()
+        return f"https://{domain}/file/{file_token}"
+
+    def get_folder_url(self, folder_token: str) -> str:
+        """根据 folder_token 构造飞书云盘文件夹链接"""
+        if not folder_token:
+            return ""
+        domain = self._get_tenant_domain()
+        return f"https://{domain}/drive/folder/{folder_token}"
+
+    def _get_tenant_domain(self) -> str:
+        """获取飞书租户域名"""
+        domain = getattr(settings, 'feishu_tenant_domain', None)
+        if not domain:
+            domain = "bytedance.feishu.cn"
+        return domain
 
     async def get_user_info(self, open_id: str) -> dict:
         """获取用户信息"""
