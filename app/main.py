@@ -136,6 +136,17 @@ async def handle_events(request: Request):
             print(f"[EVENT] 消息事件处理完成", flush=True)
 
         elif event_type == "card.action.trigger":
+            # 打印原始 event 数据用于调试
+            print(f"[EVENT] card.action.trigger raw event keys: {list(event.keys())}", flush=True)
+            if "action" in event:
+                act = event["action"]
+                print(f"[EVENT] action keys: {list(act.keys()) if isinstance(act, dict) else type(act)}", flush=True)
+                if isinstance(act, dict) and "value" in act:
+                    print(f"[EVENT] action.value keys: {list(act['value'].keys())}", flush=True)
+            if "operator" in event:
+                op = event["operator"]
+                print(f"[EVENT] operator keys: {list(op.keys()) if isinstance(op, dict) else type(op)}", flush=True)
+
             # 标准化为统一的 callback dict 格式（与 /api/card/callback 一致）
             callback = {
                 "action": event.get("action", {}),

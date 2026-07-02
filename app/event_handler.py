@@ -187,7 +187,9 @@ class EventHandler:
                 operator.get("operator_id", {}).get("open_id", "")
             )
 
-            print(f"[CARD] action={action_type}, operator_id={operator_id}, msg_id={message_id}", flush=True)
+            print(f"[CARD] action={action_type}, operator_id={operator_id}, msg_id={message_id}, file_key={file_key}", flush=True)
+            # 调试日志：打印原始 operator 结构
+            print(f"[CARD-DEBUG] operator keys={list(operator.keys()) if operator else 'None'}, value keys={list(value.keys())}", flush=True)
 
             # 回调去重：同一 (message_id, file_key, action) 5 秒内只处理一次
             # 不包含 operator_id — 两个回调入口的 operator 格式可能不同，
@@ -278,13 +280,30 @@ class EventHandler:
         return ""
 
     async def _check_sender_permission(self, message_id: str, operator_id: str, file_key: str = "") -> bool:
-        """检查操作人是否是发送人"""
+        """检查操作人是否是发送人
+
+        优先用 message_id + file_key 精确查，查不到则只用 message_id 兜底。
+        """
         if not message_id or not operator_id:
+            print(f"[PERM] FAIL: empty message_id or operator_id", flush=True)
             return False
-        confirmation = await state_manager.get_confirmation(message_id, file_key or None)
+
+        fk = file_key.strip() if file_key else ""
+        # 先精确查询
+        confirmation = await state_manager.get_confirmation(message_id, fk or None)
+        # 兜底：file_key 没查到就用 message_id 单独查
+        if not confirmation and fk:
+            print(f"[PERM] 精确查询未命中 (msg={message_id}, fk={fk})，兜底查询...", flush=True)
+            confirmation = await state_manager.get_confirmation(message_id, None)
+
         if not confirmation:
+            print(f"[PERM] FAIL: confirmation not found for msg_id={message_id}", flush=True)
             return False
-        return operator_id == confirmation.get("sender_id", "")
+
+        sender_id = confirmation.get("sender_id", "")
+        match = operator_id == sender_id
+        print(f"[PERM] operator={operator_id} vs sender={sender_id} → {'PASS' if match else 'FAIL'}", flush=True)
+        return match
 
     async def _get_cached_operator_name(self, operator_id: str) -> Optional[str]:
         """
