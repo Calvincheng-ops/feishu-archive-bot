@@ -374,6 +374,30 @@ class CardBuilder:
         }
     
     @staticmethod
+    def build_go_back_done_card(file_name: str, folder_name: str) -> Dict[str, Any]:
+        """已返回上一级卡片 — 更新原卡片"""
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "⬅️ 已返回上一级"},
+                "template": "grey"
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            f"**文件**：{file_name}\n"
+                            f"**当前文件夹**：{folder_name}\n\n"
+                            f"子文件夹列表已刷新，请继续选择。"
+                        )
+                    }
+                }
+            ]
+        }
+
+    @staticmethod
     def build_no_mapping_card(chat_name: str) -> Dict[str, Any]:
         """未配置映射提示卡片"""
         return {

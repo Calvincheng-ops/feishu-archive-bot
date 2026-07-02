@@ -226,6 +226,25 @@ class LarkClient:
             "description": response.data.description
         }
     
+    def get_file_url(self, file_token: str) -> str:
+        """根据 file_token 构造飞书云盘文件链接
+
+        Args:
+            file_token: upload_all 返回的 file_token（以 box 开头）
+
+        Returns:
+            文件的可访问 URL，如 https://westoeast.feishu.cn/file/boxcnrHpsg1QDqXAAAyachabcef
+        """
+        if not file_token:
+            return ""
+        # 从 app_id 推断租户域名（cli_xxx 格式的 app 对应企业域名）
+        # 默认使用 feishu.cn，用户可在 .env 中配置自定义域名
+        tenant_domain = getattr(settings, 'feishu_tenant_domain', None)
+        if not tenant_domain:
+            # 尝试从 SDK client 配置中获取，或使用默认值
+            tenant_domain = "bytedance.feishu.cn"
+        return f"https://{tenant_domain}/file/{file_token}"
+
     async def get_user_info(self, open_id: str) -> dict:
         """获取用户信息"""
         if not open_id:

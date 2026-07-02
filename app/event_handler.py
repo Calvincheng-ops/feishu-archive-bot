@@ -1,5 +1,6 @@
 """事件订阅处理 - 支持多步骤卡片交互"""
 import json
+import time
 import asyncio
 from typing import Dict, Any, Optional
 
@@ -16,6 +17,7 @@ class EventHandler:
 
     def __init__(self):
         self._operator_name_cache: Dict[str, str] = {}  # open_id -> name cache
+        self._callback_dedup: Dict[str, float] = {}  # dedup key -> timestamp
 
     async def handle_message_event(self, event: Dict[str, Any]):
         try:
@@ -161,24 +163,36 @@ class EventHandler:
             import traceback
             traceback.print_exc()
 
-    async def handle_card_callback(self, callback: Dict[str, Any]) -> Dict[str, Any]:
-        """处理卡片回调事件"""
+    async def handle_card_callback(self, callback: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """处理卡片回调事件
+
+        返回值协议：
+        - {"_type": "card", "card": {...}}  → 更新卡片（全群可见）
+        - {"_type": "toast", "toast": {...}} → Toast 提示（仅点击者可见）
+        - None → 空响应
+        """
         try:
             action = callback.get("action", {})
             value = action.get("value", {})
             operator = callback.get("operator", {})
 
             action_type = value.get("action", "")
+            message_id = value.get("message_id", "")
 
             # 统一提取 operator_id（兼容两种回调格式）
-            # 卡片回调: operator.open_id
-            # 事件订阅: operator.operator_id.open_id
             operator_id = (
                 operator.get("open_id", "") or
                 operator.get("operator_id", {}).get("open_id", "")
             )
 
-            print(f"[CARD] action={action_type}, operator_id={operator_id}", flush=True)
+            print(f"[CARD] action={action_type}, operator_id={operator_id}, msg_id={message_id}", flush=True)
+
+            # 回调去重：同一 (message_id, action, operator) 5 秒内只处理一次
+            if message_id and action_type and operator_id:
+                dedup_key = f"{message_id}:{action_type}:{operator_id}"
+                if self._is_duplicate_callback(dedup_key):
+                    print(f"[DEDUP] 跳过重复回调: {dedup_key}", flush=True)
+                    return None
 
             if action_type == "browse_folders":
                 return await self._handle_browse_folders(value, operator_id, callback)
@@ -207,6 +221,53 @@ class EventHandler:
             chat_id = callback.get("context", {}).get("open_chat_id", "")
         return chat_id
 
+    # ── 响应协议辅助 ───────────────────────────────────────────
+
+    @staticmethod
+    def _card(card_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """包装卡片更新响应"""
+        return {"_type": "card", "card": card_dict}
+
+    @staticmethod
+    def _toast(toast_type: str, content: str) -> Dict[str, Any]:
+        """包装 Toast 提示响应（仅点击者可见，卡片不变）"""
+        return {"_type": "toast", "toast": {"type": toast_type, "content": content}}
+
+    # ── 回调去重 ───────────────────────────────────────────────
+
+    def _is_duplicate_callback(self, dedup_key: str) -> bool:
+        """检查是否为 5 秒内的重复回调"""
+        now = time.time()
+        if dedup_key in self._callback_dedup:
+            if now - self._callback_dedup[dedup_key] < 5:
+                return True
+        self._callback_dedup[dedup_key] = now
+        # 定期清理过期条目
+        if len(self._callback_dedup) > 1000:
+            self._callback_dedup = {
+                k: v for k, v in self._callback_dedup.items()
+                if now - v < 10
+            }
+        return False
+
+    # ── 操作人姓名获取 ─────────────────────────────────────────
+
+    async def _get_operator_name(self, operator_id: str) -> str:
+        """获取操作人姓名（缓存 + API 回退）"""
+        if not operator_id:
+            return ""
+        if operator_id in self._operator_name_cache:
+            return self._operator_name_cache[operator_id]
+        try:
+            user_info = await lark_client.get_user_info(operator_id)
+            name = user_info.get("name", "")
+            if name and name != "未知用户":
+                self._operator_name_cache[operator_id] = name
+                return name
+        except Exception:
+            pass
+        return ""
+
     async def _check_sender_permission(self, message_id: str, operator_id: str) -> bool:
         """检查操作人是否是发送人"""
         if not message_id or not operator_id:
@@ -234,11 +295,12 @@ class EventHandler:
         sender_name = value.get("sender_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
-        # 权限检查（从缓存读操作人名称，不调 API）
+        # 权限检查：非发送人 → Toast 拒绝（不更新卡片）
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[BROWSE] 权限不足: operator={operator_id}", flush=True)
-            operator_name = await self._get_cached_operator_name(operator_id)
-            return card_builder.build_no_permission_card(operator_name)
+            name = await self._get_operator_name(operator_id)
+            msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
+            return self._toast("error", msg)
 
         # 获取子文件夹列表
         subfolders = await lark_client.list_folder_children(folder_token)
@@ -257,7 +319,7 @@ class EventHandler:
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
 
-            return card_builder.build_selected_card(file_name, "根目录")
+            return self._card(card_builder.build_selected_card(file_name, "根目录"))
         else:
             mapping = await mapping_service.get_folder_mapping(chat_id)
             parent_name = mapping.folder_name if mapping else "归档文件夹"
@@ -274,7 +336,7 @@ class EventHandler:
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=folder_list_card)
 
-            return card_builder.build_browse_done_card(file_name, parent_name)
+            return self._card(card_builder.build_browse_done_card(file_name, parent_name))
 
     async def _handle_select_folder(self, value: Dict, operator_id: str, callback: Dict):
         """处理选择子文件夹"""
@@ -287,11 +349,12 @@ class EventHandler:
         sender_name = value.get("sender_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
-        # 权限检查
+        # 权限检查：非发送人 → Toast 拒绝
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[SELECT] 权限不足: operator={operator_id}", flush=True)
-            operator_name = await self._get_cached_operator_name(operator_id)
-            return card_builder.build_no_permission_card(operator_name)
+            name = await self._get_operator_name(operator_id)
+            msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
+            return self._toast("error", msg)
 
         subfolders = await lark_client.list_folder_children(folder_token)
 
@@ -308,7 +371,7 @@ class EventHandler:
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=new_folder_card)
 
-            return card_builder.build_selected_card(file_name, folder_name)
+            return self._card(card_builder.build_selected_card(file_name, folder_name))
         else:
             confirm_card = card_builder.build_confirm_upload_card(
                 file_name=file_name,
@@ -322,15 +385,16 @@ class EventHandler:
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
 
-            return card_builder.build_selected_card(file_name, folder_name)
+            return self._card(card_builder.build_selected_card(file_name, folder_name))
 
     async def _handle_confirm_upload(self, value: Dict, operator_id: str, callback: Dict):
         """处理确认上传"""
         message_id = value.get("message_id", "")
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[CONFIRM] 权限不足: operator={operator_id}", flush=True)
-            operator_name = await self._get_cached_operator_name(operator_id)
-            return card_builder.build_no_permission_card(operator_name)
+            name = await self._get_operator_name(operator_id)
+            msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
+            return self._toast("error", msg)
 
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
@@ -351,7 +415,7 @@ class EventHandler:
         if chat_id:
             await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
 
-        return card_builder.build_selected_card(file_name, folder_name)
+        return self._card(card_builder.build_selected_card(file_name, folder_name))
 
     async def _handle_do_upload(self, value: Dict, operator_id: str, callback: Dict):
         """执行文件上传"""
@@ -368,18 +432,19 @@ class EventHandler:
 
         if not is_permitted:
             print(f"[UPLOAD] 权限不足", flush=True)
-            operator_name = await self._get_cached_operator_name(operator_id)
-            return card_builder.build_no_permission_card(operator_name)
+            name = await self._get_operator_name(operator_id)
+            msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
+            return self._toast("error", msg)
 
         confirmation = await state_manager.get_confirmation(message_id)
         print(f"[UPLOAD] 确认记录: {confirmation}", flush=True)
 
         if not confirmation:
             print(f"[UPLOAD] 未找到确认记录，message_id={message_id}", flush=True)
-            return card_builder.build_error_card(
+            return self._card(card_builder.build_error_card(
                 file_name=file_name,
                 error_msg="未找到上传确认记录，请重新发起"
-            )
+            ))
 
         await state_manager.update_confirmation_status(message_id, "confirmed")
 
@@ -396,7 +461,7 @@ class EventHandler:
             operator_id=operator_id
         ))
 
-        return card_builder.build_uploading_card(file_name)
+        return self._card(card_builder.build_uploading_card(file_name))
 
     async def _do_upload_background(
         self,
@@ -434,11 +499,17 @@ class EventHandler:
                     folder_display_name = mapping.folder_name if mapping else "归档文件夹"
                     print(f"[UPLOAD] 文件夹显示名称: {folder_display_name}, chat_id={chat_id}", flush=True)
 
+                    # 构造文件链接
+                    file_token = result.get("file_token", "")
+                    file_url = lark_client.get_file_url(file_token) if file_token else ""
+                    print(f"[UPLOAD] 文件链接: {file_url}", flush=True)
+
                     await lark_client.send_card(
                         chat_id=chat_id,
                         card_json=card_builder.build_success_card(
                             file_name=file_name,
-                            folder_name=folder_display_name
+                            folder_name=folder_display_name,
+                            file_url=file_url
                         )
                     )
             else:
@@ -475,34 +546,51 @@ class EventHandler:
         sender_name = value.get("sender_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
+        # 权限检查
         if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[GO_BACK] 权限不足: operator={operator_id}", flush=True)
-            operator_name = await self._get_cached_operator_name(operator_id)
-            return card_builder.build_no_permission_card(operator_name)
+            name = await self._get_operator_name(operator_id)
+            msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
+            return self._toast("error", msg)
 
         subfolders = await lark_client.list_folder_children(folder_token)
         print(f"[GO_BACK] 返回到文件夹: {folder_name}, 子文件夹: {subfolders}", flush=True)
 
+        # 发送上一级文件夹列表作为新卡片
         if subfolders:
-            return card_builder.build_folder_list_card(
-                file_name=file_name,
-                file_key=file_key,
-                message_id=message_id,
-                parent_folder_token=folder_token,
-                parent_folder_name=folder_name,
-                folders=subfolders,
-                sender_name=sender_name
-            )
+            if chat_id:
+                await lark_client.send_card(
+                    chat_id=chat_id,
+                    card_json=card_builder.build_folder_list_card(
+                        file_name=file_name,
+                        file_key=file_key,
+                        message_id=message_id,
+                        parent_folder_token=folder_token,
+                        parent_folder_name=folder_name,
+                        folders=subfolders,
+                        sender_name=sender_name
+                    )
+                )
         else:
-            return card_builder.build_file_detected_card(
-                file_name=file_name,
-                folder_name=folder_name,
-                sender_name=sender_name,
-                file_key=file_key,
-                folder_token=folder_token,
-                message_id=message_id,
-                has_subfolders=False
-            )
+            # 没有子文件夹 → 回到根目录卡片
+            if chat_id:
+                mapping = await mapping_service.get_folder_mapping(chat_id)
+                root_name = mapping.folder_name if mapping else folder_name
+                await lark_client.send_card(
+                    chat_id=chat_id,
+                    card_json=card_builder.build_file_detected_card(
+                        file_name=file_name,
+                        folder_name=root_name,
+                        sender_name=sender_name,
+                        file_key=file_key,
+                        folder_token=folder_token,
+                        message_id=message_id,
+                        has_subfolders=False
+                    )
+                )
+
+        # 原卡片更新为「已返回」灰色状态
+        return self._card(card_builder.build_go_back_done_card(file_name, folder_name))
 
     async def _handle_cancel(self, value: Dict, operator_id: str, callback: Dict):
         """取消上传 - 只有发起人可以取消"""
@@ -512,19 +600,23 @@ class EventHandler:
             is_permitted = await self._check_sender_permission(message_id, operator_id)
             if not is_permitted:
                 print(f"[CANCEL] 权限不足: operator={operator_id}", flush=True)
-                operator_name = await self._get_cached_operator_name(operator_id)
-                return card_builder.build_no_permission_card(operator_name)
+                name = await self._get_operator_name(operator_id)
+                msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
+                return self._toast("error", msg)
 
             confirmation = await state_manager.get_confirmation(message_id)
             if confirmation and confirmation.get("status") in ["completed", "confirmed"]:
                 print(f"[CANCEL] 文件已上传，忽略取消操作", flush=True)
-                return card_builder.build_error_card(
+                return self._card(card_builder.build_error_card(
                     file_name=confirmation.get("file_name", ""),
                     error_msg="文件已上传成功，无法取消"
-                )
+                ))
+
+            # 标记为已取消
+            await state_manager.update_confirmation_status(message_id, "cancelled")
 
         print(f"[CANCEL] 取消上传: operator={operator_id}", flush=True)
-        return card_builder.build_cancel_card()
+        return self._card(card_builder.build_cancel_card())
 
 
 # 全局事件处理器实例

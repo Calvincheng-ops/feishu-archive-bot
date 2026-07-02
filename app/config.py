@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 100  # 最大文件大小（MB）
     cache_refresh_interval: int = 300  # 映射缓存刷新间隔（秒）
     log_level: str = "INFO"
+    feishu_tenant_domain: str = ""  # 飞书租户域名（如 westoeast.feishu.cn），用于拼文件链接
     
     # 数据库
     db_path: str = "./data/archive_bot.db"

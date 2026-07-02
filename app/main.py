@@ -16,6 +16,29 @@ from app.services.mapping_service import mapping_service
 from Crypto.Cipher import AES
 
 
+def _build_card_response(handler_result: dict) -> JSONResponse:
+    """根据 handler 返回值类型组装 HTTP 响应
+
+    handler 返回协议：
+    - {"_type": "card", "card": {...}} → 更新卡片（全群可见）
+    - {"_type": "toast", "toast": {...}} → Toast 提示（仅点击者可见）
+    - None / {} → 空响应
+    """
+    if not handler_result:
+        return JSONResponse({})
+    typ = handler_result.get("_type", "")
+    if typ == "toast":
+        print(f"[RESP] 返回 Toast: {handler_result['toast'].get('content', '')[:50]}", flush=True)
+        return JSONResponse({"toast": handler_result["toast"]})
+    if typ == "card":
+        card = handler_result["card"]
+        print(f"[RESP] 返回卡片更新: {json.dumps(card, ensure_ascii=False)[:100]}...", flush=True)
+        return JSONResponse(card)
+    # 兼容旧格式：直接返回卡片 dict
+    print(f"[RESP] 返回旧格式卡片", flush=True)
+    return JSONResponse(handler_result)
+
+
 def decrypt_event(encrypted_data: str, encrypt_key: str) -> dict:
     """解密飞书加密事件"""
     key = hashlib.sha256(encrypt_key.encode('utf-8')).digest()
@@ -110,9 +133,8 @@ async def handle_events(request: Request):
                 "open_chat_id": event.get("context", {}).get("open_chat_id", ""),
                 "context": event.get("context", {})
             }
-            updated_card = await event_handler.handle_card_callback(callback)
-            if updated_card:
-                return JSONResponse(updated_card)
+            resp = await event_handler.handle_card_callback(callback)
+            return _build_card_response(resp)
 
         return JSONResponse({"code": 0})
 
@@ -152,17 +174,8 @@ async def handle_card_callback(request: Request):
         operator_id = operator.get("open_id", "") or operator.get("operator_id", {}).get("open_id", "")
         print(f"[CARD] action={action_type}, operator_id={operator_id}", flush=True)
 
-        updated_card = await event_handler.handle_card_callback(callback)
-
-        if updated_card:
-            print(f"[CARD] 返回更新卡片: {json.dumps(updated_card, ensure_ascii=False)[:200]}...", flush=True)
-        else:
-            print(f"[CARD] 返回空响应（不更新卡片）", flush=True)
-
-        if updated_card:
-            return JSONResponse(updated_card)
-
-        return JSONResponse({})
+        resp = await event_handler.handle_card_callback(callback)
+        return _build_card_response(resp)
 
     except Exception as e:
         print(f"[CARD] 处理卡片回调失败: {e}", flush=True)
