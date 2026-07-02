@@ -50,7 +50,8 @@ class CardBuilder:
                 "folder_token": folder_token,
                 "folder_name": folder_name,
                 "message_id": message_id,
-                "file_name": file_name
+                "file_name": file_name,
+                "sender_name": sender_name
             }
         })
         
@@ -58,7 +59,7 @@ class CardBuilder:
             "tag": "button",
             "text": {"tag": "plain_text", "content": "❌ 取消"},
             "type": "danger",
-            "value": {"action": "cancel", "message_id": message_id}
+            "value": {"action": "cancel", "message_id": message_id, "file_key": file_key}
         })
         
         return {
@@ -117,7 +118,8 @@ class CardBuilder:
                 "folder_token": parent_folder_token,
                 "folder_name": parent_folder_name,
                 "message_id": message_id,
-                "file_name": file_name
+                "file_name": file_name,
+                "sender_name": sender_name
             }
         })
         
@@ -225,14 +227,15 @@ class CardBuilder:
                                 "file_key": file_key,
                                 "folder_token": folder_token,
                                 "message_id": message_id,
-                                "file_name": file_name
+                                "file_name": file_name,
+                                "sender_name": sender_name
                             }
                         },
                         {
                             "tag": "button",
                             "text": {"tag": "plain_text", "content": "❌ 取消"},
                             "type": "danger",
-                            "value": {"action": "cancel", "message_id": message_id}
+                            "value": {"action": "cancel", "message_id": message_id, "file_key": file_key}
                         }
                     ]
                 }

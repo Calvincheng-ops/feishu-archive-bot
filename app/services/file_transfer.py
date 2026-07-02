@@ -58,6 +58,9 @@ class FileTransferService:
                 file_size = os.path.getsize(local_path)
                 max_size = settings.max_file_size_mb * 1024 * 1024
                 
+                if file_size == 0:
+                    raise EmptyFileError()
+
                 if file_size > max_size:
                     raise FileTooLargeError(file_size, max_size)
                 
@@ -72,9 +75,16 @@ class FileTransferService:
                     "success": True,
                     "file_token": result.get("file_token"),
                     "file_name": file_name,
-                    "size": file_size
+                    "size": file_size,
+                    "upload_method": result.get("upload_method", "unknown")
                 }
                 
+            except EmptyFileError as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "error_type": "empty_file"
+                }
             except FileTooLargeError as e:
                 return {
                     "success": False,
@@ -149,6 +159,12 @@ class FileTooLargeError(Exception):
         super().__init__(
             f"文件大小 {file_size / 1024 / 1024:.1f}MB 超过限制 {max_size / 1024 / 1024:.1f}MB"
         )
+
+
+class EmptyFileError(Exception):
+    """空文件异常"""
+    def __init__(self):
+        super().__init__("文件为空，无法上传")
 
 
 # 全局文件传输服务实例

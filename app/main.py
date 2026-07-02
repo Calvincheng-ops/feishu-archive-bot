@@ -28,6 +28,16 @@ def decrypt_event(encrypted_data: str, encrypt_key: str) -> dict:
     return json.loads(decrypted.decode('utf-8'))
 
 
+def build_card_callback_response(card_json: Dict[str, Any]) -> Dict[str, Any]:
+    """包装新版 card.action.trigger 回调响应。"""
+    return {
+        "card": {
+            "type": "raw",
+            "data": card_json
+        }
+    }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -112,7 +122,7 @@ async def handle_events(request: Request):
             }
             updated_card = await event_handler.handle_card_callback(callback)
             if updated_card:
-                return JSONResponse(updated_card)
+                return JSONResponse(build_card_callback_response(updated_card))
 
         return JSONResponse({"code": 0})
 
@@ -160,7 +170,7 @@ async def handle_card_callback(request: Request):
             print(f"[CARD] 返回空响应（不更新卡片）", flush=True)
 
         if updated_card:
-            return JSONResponse(updated_card)
+            return JSONResponse(build_card_callback_response(updated_card))
 
         return JSONResponse({})
 

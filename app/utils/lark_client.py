@@ -2,7 +2,7 @@
 import json
 import os
 import tempfile
-from typing import Optional
+from typing import Optional, Any, Dict
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 from lark_oapi.api.drive.v1 import *
@@ -72,25 +72,108 @@ class LarkClient:
     ) -> dict:
         """上传文件到云盘指定文件夹"""
         file_size = os.path.getsize(file_path)
-        
-        # 构建上传请求
-        request = UploadAllFileRequest.builder() \
-            .request_body(UploadAllFileRequestBody.builder()
+        direct_limit = settings.direct_upload_limit_mb * 1024 * 1024
+
+        if file_size <= direct_limit:
+            result = await self._upload_file_direct(folder_token, file_path, file_name, file_size)
+            result["upload_method"] = "direct"
+            return result
+
+        result = await self._upload_file_multipart(folder_token, file_path, file_name, file_size)
+        result["upload_method"] = "multipart"
+        return result
+
+    async def _upload_file_direct(
+        self,
+        folder_token: str,
+        file_path: str,
+        file_name: str,
+        file_size: int
+    ) -> dict:
+        """20MB 以内文件使用直接上传。"""
+        with open(file_path, "rb") as file_obj:
+            request = UploadAllFileRequest.builder() \
+                .request_body(UploadAllFileRequestBody.builder()
+                    .file_name(file_name)
+                    .parent_type("explorer")
+                    .parent_node(folder_token)
+                    .size(file_size)
+                    .file(file_obj)
+                    .build()) \
+                .build()
+
+            response = self.client.drive.v1.file.upload_all(request)
+
+        if not response.success():
+            raise Exception(f"上传文件失败: {response.msg}")
+
+        return {
+            "file_token": response.data.file_token,
+            "file_name": file_name,
+            "size": file_size
+        }
+
+    async def _upload_file_multipart(
+        self,
+        folder_token: str,
+        file_path: str,
+        file_name: str,
+        file_size: int
+    ) -> dict:
+        """20MB 以上文件使用云空间分片上传。"""
+        prepare_request = UploadPrepareFileRequest.builder() \
+            .request_body(FileUploadInfo.builder()
                 .file_name(file_name)
                 .parent_type("explorer")
                 .parent_node(folder_token)
                 .size(file_size)
-                .file(open(file_path, "rb"))
                 .build()) \
             .build()
-        
-        response = self.client.drive.v1.file.upload_all(request)
-        
-        if not response.success():
-            raise Exception(f"上传文件失败: {response.msg}")
-        
+
+        prepare_response = self.client.drive.v1.file.upload_prepare(prepare_request)
+        if not prepare_response.success():
+            raise Exception(f"分片上传预处理失败: {prepare_response.msg}")
+
+        upload_id = prepare_response.data.upload_id
+        block_size = prepare_response.data.block_size
+        block_num = prepare_response.data.block_num
+
+        with open(file_path, "rb") as source:
+            for seq in range(block_num):
+                chunk = source.read(block_size)
+                if not chunk:
+                    break
+
+                with tempfile.TemporaryFile() as part_file:
+                    part_file.write(chunk)
+                    part_file.seek(0)
+                    part_request = UploadPartFileRequest.builder() \
+                        .request_body(UploadPartFileRequestBody.builder()
+                            .upload_id(upload_id)
+                            .seq(seq)
+                            .size(len(chunk))
+                            .file(part_file)
+                            .build()) \
+                        .build()
+
+                    part_response = self.client.drive.v1.file.upload_part(part_request)
+
+                if not part_response.success():
+                    raise Exception(f"分片上传第 {seq + 1}/{block_num} 片失败: {part_response.msg}")
+
+        finish_request = UploadFinishFileRequest.builder() \
+            .request_body(UploadFinishFileRequestBody.builder()
+                .upload_id(upload_id)
+                .block_num(block_num)
+                .build()) \
+            .build()
+
+        finish_response = self.client.drive.v1.file.upload_finish(finish_request)
+        if not finish_response.success():
+            raise Exception(f"完成分片上传失败: {finish_response.msg}")
+
         return {
-            "file_token": response.data.file_token,
+            "file_token": finish_response.data.file_token,
             "file_name": file_name,
             "size": file_size
         }
