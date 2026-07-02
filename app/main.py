@@ -16,6 +16,16 @@ from app.services.mapping_service import mapping_service
 from Crypto.Cipher import AES
 
 
+def _wrap_raw_card(card_json: Dict[str, Any]) -> Dict[str, Any]:
+    """包装新版 card.action.trigger 回调响应。"""
+    return {
+        "card": {
+            "type": "raw",
+            "data": card_json
+        }
+    }
+
+
 def _build_card_response(handler_result: dict) -> JSONResponse:
     """根据 handler 返回值类型组装 HTTP 响应
 
@@ -33,10 +43,10 @@ def _build_card_response(handler_result: dict) -> JSONResponse:
     if typ == "card":
         card = handler_result["card"]
         print(f"[RESP] 返回卡片更新: {json.dumps(card, ensure_ascii=False)[:100]}...", flush=True)
-        return JSONResponse(card)
+        return JSONResponse(_wrap_raw_card(card))
     # 兼容旧格式：直接返回卡片 dict
     print(f"[RESP] 返回旧格式卡片", flush=True)
-    return JSONResponse(handler_result)
+    return JSONResponse(_wrap_raw_card(handler_result))
 
 
 def decrypt_event(encrypted_data: str, encrypt_key: str) -> dict:

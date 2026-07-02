@@ -34,11 +34,6 @@ class EventHandler:
 
             print(f"[EVENT] msg_id={message_id}, chat={chat_id}, type={message_type}, sender={sender_id}", flush=True)
 
-            # 消息去重 - 使用 SQLite 持久化
-            if await state_manager.is_message_processed(message_id):
-                print(f"[EVENT] 消息已在处理中，检查是否有新文件: {message_id}", flush=True)
-            await state_manager.mark_message_processed(message_id)
-
             # 只处理群聊消息
             if chat_type != "group":
                 return
@@ -46,7 +41,9 @@ class EventHandler:
             # 检查是否被 @
             mentions = message.get("mentions", [])
             bot_mentioned = any(
-                m.get("key") == "@_user_1" or m.get("id", {}).get("open_id", "") == "bot"
+                m.get("mentioned_type") == "bot" or
+                m.get("id", {}).get("open_id", "") == "bot" or
+                m.get("id", {}).get("app_id", "") == "bot"
                 for m in mentions
             )
 
@@ -130,13 +127,13 @@ class EventHandler:
 
             # 对每个文件发送选择卡片
             for file_info in files:
-                # 检查文件是否已经在处理中
-                if await state_manager.is_file_pending(message_id, file_info.file_key):
-                    print(f"[EVENT] 文件已在处理中，跳过: {file_info.file_name}", flush=True)
+                # 检查文件是否已经处理，幂等键为 message_id + file_key。
+                if await state_manager.is_file_processed(message_id, file_info.file_key):
+                    print(f"[EVENT] 文件已进入归档流程，跳过: {file_info.file_name}", flush=True)
                     continue
 
                 # 创建确认记录
-                await state_manager.create_confirmation(
+                confirmation_id = await state_manager.create_confirmation(
                     message_id=message_id,
                     file_key=file_info.file_key,
                     file_name=file_info.file_name,
@@ -145,6 +142,9 @@ class EventHandler:
                     chat_id=chat_id,
                     source_message_id=source_message_id
                 )
+                if confirmation_id is None:
+                    print(f"[EVENT] 文件确认记录已存在，跳过: {file_info.file_name}", flush=True)
+                    continue
 
                 # 发送文件检测卡片
                 card_json = card_builder.build_file_detected_card(
@@ -179,6 +179,7 @@ class EventHandler:
 
             action_type = value.get("action", "")
             message_id = value.get("message_id", "")
+            file_key = value.get("file_key", "")
 
             # 统一提取 operator_id（兼容两种回调格式）
             operator_id = (
@@ -188,11 +189,11 @@ class EventHandler:
 
             print(f"[CARD] action={action_type}, operator_id={operator_id}, msg_id={message_id}", flush=True)
 
-            # 回调去重：同一 (message_id, action) 5 秒内只处理一次
+            # 回调去重：同一 (message_id, file_key, action) 5 秒内只处理一次
             # 不包含 operator_id — 两个回调入口的 operator 格式可能不同，
             # 导致同一个按钮点击在 /api/events 和 /api/card/callback 中产生不同 key
             if message_id and action_type:
-                dedup_key = f"{message_id}:{action_type}"
+                dedup_key = f"{message_id}:{file_key}:{action_type}"
                 if await self._check_and_mark_callback(dedup_key):
                     print(f"[DEDUP] 跳过重复回调: {dedup_key}", flush=True)
                     return None
@@ -276,11 +277,11 @@ class EventHandler:
             pass
         return ""
 
-    async def _check_sender_permission(self, message_id: str, operator_id: str) -> bool:
+    async def _check_sender_permission(self, message_id: str, operator_id: str, file_key: str = "") -> bool:
         """检查操作人是否是发送人"""
         if not message_id or not operator_id:
             return False
-        confirmation = await state_manager.get_confirmation(message_id)
+        confirmation = await state_manager.get_confirmation(message_id, file_key or None)
         if not confirmation:
             return False
         return operator_id == confirmation.get("sender_id", "")
@@ -304,7 +305,7 @@ class EventHandler:
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查：非发送人 → Toast 拒绝（不更新卡片）
-        if message_id and not await self._check_sender_permission(message_id, operator_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id, file_key):
             print(f"[BROWSE] 权限不足: operator={operator_id}", flush=True)
             name = await self._get_operator_name(operator_id)
             msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
@@ -358,7 +359,7 @@ class EventHandler:
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查：非发送人 → Toast 拒绝
-        if message_id and not await self._check_sender_permission(message_id, operator_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id, file_key):
             print(f"[SELECT] 权限不足: operator={operator_id}", flush=True)
             name = await self._get_operator_name(operator_id)
             msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
@@ -398,13 +399,13 @@ class EventHandler:
     async def _handle_confirm_upload(self, value: Dict, operator_id: str, callback: Dict):
         """处理确认上传"""
         message_id = value.get("message_id", "")
-        if message_id and not await self._check_sender_permission(message_id, operator_id):
+        file_key = value.get("file_key", "")
+        if message_id and not await self._check_sender_permission(message_id, operator_id, file_key):
             print(f"[CONFIRM] 权限不足: operator={operator_id}", flush=True)
             name = await self._get_operator_name(operator_id)
             msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
             return self._toast("error", msg)
 
-        file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
         folder_name = value.get("folder_name", "")
         file_name = value.get("file_name", "")
@@ -437,7 +438,7 @@ class EventHandler:
 
         print(f"[UPLOAD] 开始上传: file={file_name}, folder={folder_token}, operator={operator_id}", flush=True)
 
-        is_permitted = await self._check_sender_permission(message_id, operator_id)
+        is_permitted = await self._check_sender_permission(message_id, operator_id, file_key)
         print(f"[UPLOAD] 权限检查: {is_permitted}, message_id={message_id}", flush=True)
 
         if not is_permitted:
@@ -446,7 +447,7 @@ class EventHandler:
             msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
             return self._toast("error", msg)
 
-        confirmation = await state_manager.get_confirmation(message_id)
+        confirmation = await state_manager.get_confirmation(message_id, file_key)
         print(f"[UPLOAD] 确认记录: {confirmation}", flush=True)
 
         if not confirmation:
@@ -456,7 +457,20 @@ class EventHandler:
                 error_msg="未找到上传确认记录，请重新发起"
             ))
 
-        await state_manager.update_confirmation_status(message_id, "confirmed")
+        if confirmation.get("status") != "pending":
+            print(f"[UPLOAD] 状态不是 pending，拒绝重复确认: {confirmation.get('status')}", flush=True)
+            return self._card(card_builder.build_error_card(
+                file_name=file_name,
+                error_msg="该文件已经确认或处理完成，请勿重复点击"
+            ))
+
+        confirmed = await state_manager.mark_confirmation_confirmed(message_id, file_key)
+        if not confirmed:
+            print(f"[UPLOAD] 状态原子更新失败，可能重复点击: message_id={message_id}, file_key={file_key}", flush=True)
+            return self._card(card_builder.build_error_card(
+                file_name=file_name,
+                error_msg="该文件已经确认或处理完成，请勿重复点击"
+            ))
 
         source_message_id = confirmation.get("source_message_id", message_id)
         print(f"[UPLOAD] 源消息ID: {source_message_id}", flush=True)
@@ -497,7 +511,7 @@ class EventHandler:
             print(f"[UPLOAD] 上传结果: {result}", flush=True)
 
             if result["success"]:
-                await state_manager.update_confirmation_status(message_id, "completed")
+                await state_manager.update_confirmation_status(message_id, "completed", file_key=file_key)
                 await state_manager.log_operation(
                     chat_id=chat_id,
                     sender_id=operator_id,
@@ -527,7 +541,7 @@ class EventHandler:
                         )
                     )
             else:
-                await state_manager.update_confirmation_status(message_id, "failed")
+                await state_manager.update_confirmation_status(message_id, "failed", file_key=file_key)
                 await state_manager.log_operation(
                     chat_id=chat_id,
                     sender_id=operator_id,
@@ -549,6 +563,23 @@ class EventHandler:
             print(f"[UPLOAD] 后台上传任务失败: {e}", flush=True)
             import traceback
             traceback.print_exc()
+            await state_manager.update_confirmation_status(message_id, "failed", file_key=file_key)
+            await state_manager.log_operation(
+                chat_id=chat_id,
+                sender_id=operator_id,
+                file_name=file_name,
+                folder_token=folder_token,
+                status="failed",
+                error_msg=str(e)
+            )
+            if chat_id:
+                await lark_client.send_card(
+                    chat_id=chat_id,
+                    card_json=card_builder.build_error_card(
+                        file_name=file_name,
+                        error_msg=str(e)
+                    )
+                )
 
     async def _handle_go_back(self, value: Dict, operator_id: str, callback: Dict):
         """返回上一级文件夹"""
@@ -561,7 +592,7 @@ class EventHandler:
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查
-        if message_id and not await self._check_sender_permission(message_id, operator_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id, file_key):
             print(f"[GO_BACK] 权限不足: operator={operator_id}", flush=True)
             name = await self._get_operator_name(operator_id)
             msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
@@ -609,16 +640,17 @@ class EventHandler:
     async def _handle_cancel(self, value: Dict, operator_id: str, callback: Dict):
         """取消上传 - 只有发起人可以取消"""
         message_id = value.get("message_id", "")
+        file_key = value.get("file_key", "")
 
         if message_id:
-            is_permitted = await self._check_sender_permission(message_id, operator_id)
+            is_permitted = await self._check_sender_permission(message_id, operator_id, file_key)
             if not is_permitted:
                 print(f"[CANCEL] 权限不足: operator={operator_id}", flush=True)
                 name = await self._get_operator_name(operator_id)
                 msg = f"{name}，你没有权限操作此卡片。只有发送命令的人可以操作。" if name else "你没有权限操作此卡片。只有发送命令的人可以操作。"
                 return self._toast("error", msg)
 
-            confirmation = await state_manager.get_confirmation(message_id)
+            confirmation = await state_manager.get_confirmation(message_id, file_key or None)
             if confirmation and confirmation.get("status") in ["completed", "confirmed"]:
                 print(f"[CANCEL] 文件已上传，忽略取消操作", flush=True)
                 return self._card(card_builder.build_error_card(
@@ -626,8 +658,8 @@ class EventHandler:
                     error_msg="文件已上传成功，无法取消"
                 ))
 
-            # 标记为已取消
-            await state_manager.update_confirmation_status(message_id, "cancelled")
+            if confirmation and confirmation.get("status") == "pending":
+                await state_manager.update_confirmation_status(message_id, "cancelled", file_key=file_key)
 
         print(f"[CANCEL] 取消上传: operator={operator_id}", flush=True)
         return self._card(card_builder.build_cancel_card())

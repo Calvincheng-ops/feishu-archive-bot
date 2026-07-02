@@ -59,7 +59,7 @@ class CardBuilder:
             "tag": "button",
             "text": {"tag": "plain_text", "content": "❌ 取消"},
             "type": "danger",
-            "value": {"action": "cancel", "message_id": message_id}
+            "value": {"action": "cancel", "message_id": message_id, "file_key": file_key}
         })
         
         return {
@@ -227,14 +227,15 @@ class CardBuilder:
                                 "file_key": file_key,
                                 "folder_token": folder_token,
                                 "message_id": message_id,
-                                "file_name": file_name
+                                "file_name": file_name,
+                                "sender_name": sender_name
                             }
                         },
                         {
                             "tag": "button",
                             "text": {"tag": "plain_text", "content": "❌ 取消"},
                             "type": "danger",
-                            "value": {"action": "cancel", "message_id": message_id}
+                            "value": {"action": "cancel", "message_id": message_id, "file_key": file_key}
                         }
                     ]
                 }

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     
     # 应用配置
     max_file_size_mb: int = 100  # 最大文件大小（MB）
+    direct_upload_limit_mb: int = 20  # 云空间直接上传上限（MB），更大文件走分片上传
     cache_refresh_interval: int = 300  # 映射缓存刷新间隔（秒）
     log_level: str = "INFO"
     feishu_tenant_domain: str = ""  # 飞书租户域名（如 westoeast.feishu.cn），用于拼文件链接
