@@ -147,9 +147,14 @@ class EventHandler:
                     continue
 
                 # 发送文件检测卡片
+                # 获取文件夹的真实名称
+                folder_display_name = await lark_client.get_folder_name(mapping.folder_token)
+                if not folder_display_name:
+                    folder_display_name = mapping.folder_name
+                
                 card_json = card_builder.build_file_detected_card(
                     file_name=file_info.file_name,
-                    folder_name=mapping.folder_name,
+                    folder_name=folder_display_name,
                     sender_name=sender_name,
                     file_key=file_info.file_key,
                     folder_token=mapping.folder_token,
@@ -355,7 +360,13 @@ class EventHandler:
             return self._card(card_builder.build_selected_card(file_name, "根目录"))
         else:
             mapping = await mapping_service.get_folder_mapping(chat_id)
-            parent_name = mapping.folder_name if mapping else "归档文件夹"
+            # 获取文件夹的真实名称
+            if mapping:
+                parent_name = await lark_client.get_folder_name(mapping.folder_token)
+                if not parent_name:
+                    parent_name = mapping.folder_name
+            else:
+                parent_name = "未知文件夹"
 
             folder_list_card = card_builder.build_folder_list_card(
                 file_name=file_name,
@@ -548,8 +559,13 @@ class EventHandler:
                 )
 
                 if chat_id:
-                    # 使用用户选中的子文件夹名，而非根目录映射名
-                    display_folder = folder_name if folder_name else "归档文件夹"
+                    # 使用用户选中的子文件夹名，或通过 API 获取真实名称
+                    if folder_name:
+                        display_folder = folder_name
+                    else:
+                        # 通过 API 获取文件夹的真实名称
+                        real_name = await lark_client.get_folder_name(folder_token)
+                        display_folder = real_name if real_name else "未知文件夹"
                     print(f"[UPLOAD] 文件夹显示名称: {display_folder}", flush=True)
 
                     # 构造文件链接和文件夹链接
@@ -647,7 +663,13 @@ class EventHandler:
             # 没有子文件夹 → 回到根目录卡片
             if chat_id:
                 mapping = await mapping_service.get_folder_mapping(chat_id)
-                root_name = mapping.folder_name if mapping else folder_name
+                # 获取文件夹的真实名称
+                if mapping:
+                    root_name = await lark_client.get_folder_name(mapping.folder_token)
+                    if not root_name:
+                        root_name = mapping.folder_name
+                else:
+                    root_name = folder_name
                 await lark_client.send_card(
                     chat_id=chat_id,
                     card_json=card_builder.build_file_detected_card(

@@ -323,6 +323,38 @@ class LarkClient:
         domain = self._get_tenant_domain()
         return f"https://{domain}/drive/folder/{folder_token}"
 
+    async def get_folder_name(self, folder_token: str) -> str:
+        """通过飞书 API 获取文件夹的真实名称"""
+        if not folder_token:
+            return ""
+        
+        import requests
+        token_resp = requests.post(
+            'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+            json={
+                'app_id': settings.bot_app_id,
+                'app_secret': settings.bot_app_secret
+            }
+        )
+        access_token = token_resp.json().get('tenant_access_token', '')
+        
+        headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+        resp = requests.post(
+            'https://open.feishu.cn/open-apis/drive/v1/metas/batch_query',
+            headers=headers,
+            json={
+                'request_docs': [{'doc_token': folder_token, 'doc_type': 'folder'}]
+            }
+        )
+        data = resp.json()
+        if data.get('code') == 0:
+            metas = data.get('data', {}).get('metas', [])
+            if metas:
+                return metas[0].get('title', '')
+        
+        print(f"[LARK] 获取文件夹名称失败: {data}", flush=True)
+        return ""
+
     def _get_tenant_domain(self) -> str:
         """获取飞书租户域名"""
         domain = getattr(settings, 'feishu_tenant_domain', None)
