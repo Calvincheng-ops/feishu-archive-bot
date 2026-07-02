@@ -188,8 +188,13 @@ class EventHandler:
             )
 
             print(f"[CARD] action={action_type}, operator_id={operator_id}, msg_id={message_id}, file_key={file_key}", flush=True)
-            # 调试日志：打印原始 operator 结构
             print(f"[CARD-DEBUG] operator keys={list(operator.keys()) if operator else 'None'}, value keys={list(value.keys())}", flush=True)
+
+            # 明文回调缺少 operator_id，直接丢弃 ——
+            # 不做任何处理、不弹 toast、不标记去重，让加密回调正常走
+            if not operator_id:
+                print(f"[CARD] 跳过无 operator_id 的回调（明文通道），等待加密回调处理", flush=True)
+                return None
 
             # 回调去重：同一 (message_id, file_key, action) 5 秒内只处理一次
             # 不包含 operator_id — 两个回调入口的 operator 格式可能不同，
@@ -372,6 +377,7 @@ class EventHandler:
         folder_token = value.get("folder_token", "")
         folder_name = value.get("folder_name", "")
         parent_folder_name = value.get("parent_folder_name", "")
+        parent_folder_token = value.get("parent_folder_token", "")  # 上一级 token（用于返回）
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
@@ -394,7 +400,9 @@ class EventHandler:
                 parent_folder_token=folder_token,
                 parent_folder_name=folder_name,
                 folders=subfolders,
-                sender_name=sender_name
+                sender_name=sender_name,
+                back_to_token=parent_folder_token,
+                back_to_name=parent_folder_name
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=new_folder_card)

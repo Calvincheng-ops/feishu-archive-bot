@@ -97,16 +97,18 @@ class CardBuilder:
         parent_folder_token: str,
         parent_folder_name: str,
         folders: List[Dict[str, str]],
-        sender_name: str
+        sender_name: str,
+        back_to_token: str = "",
+        back_to_name: str = ""
     ) -> Dict[str, Any]:
         """
         步骤2: 子文件夹列表卡片
-        
-        显示子文件夹供用户选择
-        增加"上传到当前文件夹"按钮
+
+        显示子文件夹供用户选择。
+        back_to_token / back_to_name: 返回按钮的目标（上一级），为空则回到根目录。
         """
         actions = []
-        
+
         # 添加"上传到当前文件夹"按钮
         actions.append({
             "tag": "button",
@@ -134,13 +136,16 @@ class CardBuilder:
                     "folder_token": folder['token'],
                     "folder_name": folder['name'],
                     "parent_folder_name": parent_folder_name,
+                    "parent_folder_token": parent_folder_token,
                     "message_id": message_id,
                     "file_name": file_name,
                     "sender_name": sender_name
                 }
             })
-        
-        # 添加返回按钮
+
+        # 添加返回按钮 — 使用 back_to_token 回到上一级
+        go_back_target = back_to_token or parent_folder_token
+        go_back_label = back_to_name or parent_folder_name
         actions.append({
             "tag": "button",
             "text": {"tag": "plain_text", "content": "⬅️ 返回"},
@@ -148,8 +153,8 @@ class CardBuilder:
             "value": {
                 "action": "go_back",
                 "file_key": file_key,
-                "folder_token": parent_folder_token,
-                "folder_name": parent_folder_name,
+                "folder_token": go_back_target,
+                "folder_name": go_back_label,
                 "message_id": message_id,
                 "file_name": file_name,
                 "sender_name": sender_name
