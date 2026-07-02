@@ -1,11 +1,13 @@
 """飞书 SDK 客户端封装"""
 import json
 import os
-from typing import Optional, Dict, Any
+import tempfile
+from typing import Optional
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 from lark_oapi.api.drive.v1 import *
 from lark_oapi.api.contact.v3 import *
+import httpx
 import requests
 
 from app.config import settings
@@ -71,18 +73,18 @@ class LarkClient:
         """上传文件到云盘指定文件夹"""
         file_size = os.path.getsize(file_path)
         
-        with open(file_path, "rb") as file_obj:
-            request = UploadAllFileRequest.builder() \
-                .request_body(UploadAllFileRequestBody.builder()
-                    .file_name(file_name)
-                    .parent_type("explorer")
-                    .parent_node(folder_token)
-                    .size(file_size)
-                    .file(file_obj)
-                    .build()) \
-                .build()
-
-            response = self.client.drive.v1.file.upload_all(request)
+        # 构建上传请求
+        request = UploadAllFileRequest.builder() \
+            .request_body(UploadAllFileRequestBody.builder()
+                .file_name(file_name)
+                .parent_type("explorer")
+                .parent_node(folder_token)
+                .size(file_size)
+                .file(open(file_path, "rb"))
+                .build()) \
+            .build()
+        
+        response = self.client.drive.v1.file.upload_all(request)
         
         if not response.success():
             raise Exception(f"上传文件失败: {response.msg}")
@@ -172,18 +174,16 @@ class LarkClient:
     
     async def list_folder_children(self, folder_token: str) -> list:
         """列出云盘文件夹下的子文件夹"""
+        import httpx
+        
         token_resp = requests.post(
             'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
             json={
                 'app_id': settings.bot_app_id,
                 'app_secret': settings.bot_app_secret
-            },
-            timeout=10
+            }
         )
         access_token = token_resp.json().get('tenant_access_token', '')
-        if not access_token:
-            print(f"[LARK] 获取 tenant_access_token 失败: {token_resp.text}", flush=True)
-            return []
         
         headers = {'Authorization': f'Bearer {access_token}'}
         resp = requests.get(
@@ -192,8 +192,7 @@ class LarkClient:
             params={
                 'folder_token': folder_token,
                 'page_size': 50
-            },
-            timeout=10
+            }
         )
         data = resp.json()
         if data.get('code') != 0:

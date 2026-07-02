@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     # 注意：不能用 FEISHU_APP_ID/FEISHU_APP_SECRET，会被 Hermes 环境变量覆盖
     bot_app_id: str = ""
     bot_app_secret: str = ""
-    bot_open_id: str = ""
     
     # 事件订阅配置
     encrypt_key: str = ""  # 需要在飞书后台配置
@@ -20,18 +19,12 @@ class Settings(BaseSettings):
     bitable_table_id: str = ""  # 数据表 ID
     
     # 应用配置
-    max_file_size_mb: int = 20  # upload_all API limit is 20MB
+    max_file_size_mb: int = 100  # 最大文件大小（MB）
     cache_refresh_interval: int = 300  # 映射缓存刷新间隔（秒）
     log_level: str = "INFO"
     
     # 数据库
     db_path: str = "./data/archive_bot.db"
-
-    # Optional local/test mapping. Production should use bitable once implemented.
-    archive_chat_id: str = ""
-    archive_chat_name: str = ""
-    archive_folder_token: str = ""
-    archive_folder_name: str = "归档文件夹"
     
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

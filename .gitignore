@@ -8,7 +8,6 @@ __pycache__/
 *.so
 .Python
 venv/
-.venv/
 env/
 *.egg-info/
 dist/

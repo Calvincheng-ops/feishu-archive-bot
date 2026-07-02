@@ -3,9 +3,8 @@ import json
 import asyncio
 from typing import Dict, Any, Optional
 
-from app.config import settings
 from app.services.keyword_matcher import match_keywords
-from app.services.file_transfer import file_transfer_service
+from app.services.file_transfer import file_transfer_service, FileInfo
 from app.services.card_builder import card_builder
 from app.services.mapping_service import mapping_service
 from app.services.state_manager import state_manager
@@ -32,8 +31,10 @@ class EventHandler:
 
             print(f"[EVENT] msg_id={message_id}, chat={chat_id}, type={message_type}, sender={sender_id}", flush=True)
 
-            if not message_id:
-                return
+            # 消息去重 - 使用 SQLite 持久化
+            if await state_manager.is_message_processed(message_id):
+                print(f"[EVENT] 消息已在处理中，检查是否有新文件: {message_id}", flush=True)
+            await state_manager.mark_message_processed(message_id)
 
             # 只处理群聊消息
             if chat_type != "group":
@@ -42,19 +43,12 @@ class EventHandler:
             # 检查是否被 @
             mentions = message.get("mentions", [])
             bot_mentioned = any(
-                m.get("mentioned_type") == "bot" or
-                (settings.bot_open_id and m.get("id", {}).get("open_id", "") == settings.bot_open_id)
+                m.get("key") == "@_user_1" or m.get("id", {}).get("open_id", "") == "bot"
                 for m in mentions
             )
 
             if not bot_mentioned:
                 return
-
-            # 消息去重 - 使用 SQLite 持久化，避免飞书重复推送导致重复发卡片
-            if await state_manager.is_message_processed(message_id):
-                print(f"[EVENT] 消息已处理，跳过重复事件: {message_id}", flush=True)
-                return
-            await state_manager.mark_message_processed(message_id)
 
             # 提取文本内容
             text = ""
@@ -139,11 +133,10 @@ class EventHandler:
                     continue
 
                 # 创建确认记录
-                confirmation_id = await state_manager.create_confirmation(
+                await state_manager.create_confirmation(
                     message_id=message_id,
                     file_key=file_info.file_key,
                     file_name=file_info.file_name,
-                    file_type=file_info.file_type,
                     folder_token=mapping.folder_token,
                     sender_id=sender_id,
                     chat_id=chat_id,
@@ -158,7 +151,6 @@ class EventHandler:
                     file_key=file_info.file_key,
                     folder_token=mapping.folder_token,
                     message_id=message_id,
-                    confirmation_id=confirmation_id,
                     has_subfolders=has_subfolders
                 )
 
@@ -215,32 +207,11 @@ class EventHandler:
             chat_id = callback.get("context", {}).get("open_chat_id", "")
         return chat_id
 
-    def _get_confirmation_id(self, value: Dict[str, Any]) -> Optional[int]:
-        raw_id = value.get("confirmation_id")
-        if raw_id in ("", None):
-            return None
-        try:
-            return int(raw_id)
-        except (TypeError, ValueError):
-            return None
-
-    async def _get_confirmation(self, message_id: str, confirmation_id: Optional[int]) -> Optional[Dict[str, Any]]:
-        if confirmation_id:
-            return await state_manager.get_confirmation_by_id(confirmation_id)
-        if message_id:
-            return await state_manager.get_confirmation(message_id)
-        return None
-
-    async def _check_sender_permission(
-        self,
-        message_id: str,
-        operator_id: str,
-        confirmation_id: Optional[int] = None
-    ) -> bool:
+    async def _check_sender_permission(self, message_id: str, operator_id: str) -> bool:
         """检查操作人是否是发送人"""
-        if not operator_id:
+        if not message_id or not operator_id:
             return False
-        confirmation = await self._get_confirmation(message_id, confirmation_id)
+        confirmation = await state_manager.get_confirmation(message_id)
         if not confirmation:
             return False
         return operator_id == confirmation.get("sender_id", "")
@@ -259,13 +230,12 @@ class EventHandler:
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
         message_id = value.get("message_id", "")
-        confirmation_id = self._get_confirmation_id(value)
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查（从缓存读操作人名称，不调 API）
-        if not await self._check_sender_permission(message_id, operator_id, confirmation_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[BROWSE] 权限不足: operator={operator_id}", flush=True)
             operator_name = await self._get_cached_operator_name(operator_id)
             return card_builder.build_no_permission_card(operator_name)
@@ -282,8 +252,7 @@ class EventHandler:
                 sender_name=sender_name,
                 file_key=file_key,
                 folder_token=folder_token,
-                message_id=message_id,
-                confirmation_id=confirmation_id
+                message_id=message_id
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
@@ -297,7 +266,6 @@ class EventHandler:
                 file_name=file_name,
                 file_key=file_key,
                 message_id=message_id,
-                confirmation_id=confirmation_id,
                 parent_folder_token=folder_token,
                 parent_folder_name=parent_name,
                 folders=subfolders,
@@ -315,13 +283,12 @@ class EventHandler:
         folder_name = value.get("folder_name", "")
         parent_folder_name = value.get("parent_folder_name", "")
         message_id = value.get("message_id", "")
-        confirmation_id = self._get_confirmation_id(value)
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查
-        if not await self._check_sender_permission(message_id, operator_id, confirmation_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[SELECT] 权限不足: operator={operator_id}", flush=True)
             operator_name = await self._get_cached_operator_name(operator_id)
             return card_builder.build_no_permission_card(operator_name)
@@ -333,7 +300,6 @@ class EventHandler:
                 file_name=file_name,
                 file_key=file_key,
                 message_id=message_id,
-                confirmation_id=confirmation_id,
                 parent_folder_token=folder_token,
                 parent_folder_name=folder_name,
                 folders=subfolders,
@@ -351,8 +317,7 @@ class EventHandler:
                 sender_name=sender_name,
                 file_key=file_key,
                 folder_token=folder_token,
-                message_id=message_id,
-                confirmation_id=confirmation_id
+                message_id=message_id
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
@@ -362,8 +327,7 @@ class EventHandler:
     async def _handle_confirm_upload(self, value: Dict, operator_id: str, callback: Dict):
         """处理确认上传"""
         message_id = value.get("message_id", "")
-        confirmation_id = self._get_confirmation_id(value)
-        if not await self._check_sender_permission(message_id, operator_id, confirmation_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[CONFIRM] 权限不足: operator={operator_id}", flush=True)
             operator_name = await self._get_cached_operator_name(operator_id)
             return card_builder.build_no_permission_card(operator_name)
@@ -381,8 +345,7 @@ class EventHandler:
             sender_name="",
             file_key=file_key,
             folder_token=folder_token,
-            message_id=message_id,
-            confirmation_id=confirmation_id
+            message_id=message_id
         )
 
         if chat_id:
@@ -395,13 +358,12 @@ class EventHandler:
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
         message_id = value.get("message_id", "")
-        confirmation_id = self._get_confirmation_id(value)
         file_name = value.get("file_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
         print(f"[UPLOAD] 开始上传: file={file_name}, folder={folder_token}, operator={operator_id}", flush=True)
 
-        is_permitted = await self._check_sender_permission(message_id, operator_id, confirmation_id)
+        is_permitted = await self._check_sender_permission(message_id, operator_id)
         print(f"[UPLOAD] 权限检查: {is_permitted}, message_id={message_id}", flush=True)
 
         if not is_permitted:
@@ -409,7 +371,7 @@ class EventHandler:
             operator_name = await self._get_cached_operator_name(operator_id)
             return card_builder.build_no_permission_card(operator_name)
 
-        confirmation = await self._get_confirmation(message_id, confirmation_id)
+        confirmation = await state_manager.get_confirmation(message_id)
         print(f"[UPLOAD] 确认记录: {confirmation}", flush=True)
 
         if not confirmation:
@@ -419,34 +381,17 @@ class EventHandler:
                 error_msg="未找到上传确认记录，请重新发起"
             )
 
-        status = confirmation.get("status")
-        if status == "completed":
-            return card_builder.build_error_card(
-                file_name=file_name,
-                error_msg="文件已经上传完成，请勿重复确认"
-            )
-        if status == "confirmed":
-            return card_builder.build_uploading_card(file_name)
-        if status != "pending":
-            return card_builder.build_error_card(
-                file_name=file_name,
-                error_msg="当前归档流程已结束，请重新发起"
-            )
-
-        await state_manager.update_confirmation_status_by_id(confirmation["id"], "confirmed")
+        await state_manager.update_confirmation_status(message_id, "confirmed")
 
         source_message_id = confirmation.get("source_message_id", message_id)
-        file_type = confirmation.get("file_type", "file")
         print(f"[UPLOAD] 源消息ID: {source_message_id}", flush=True)
 
         asyncio.create_task(self._do_upload_background(
             chat_id=chat_id,
             message_id=message_id,
-            confirmation_id=confirmation["id"],
             source_message_id=source_message_id,
             file_key=file_key,
             file_name=file_name,
-            file_type=file_type,
             folder_token=folder_token,
             operator_id=operator_id
         ))
@@ -457,11 +402,9 @@ class EventHandler:
         self,
         chat_id: str,
         message_id: str,
-        confirmation_id: int,
         source_message_id: str,
         file_key: str,
         file_name: str,
-        file_type: str,
         folder_token: str,
         operator_id: str
     ):
@@ -472,13 +415,12 @@ class EventHandler:
                 message_id=source_message_id,
                 file_key=file_key,
                 file_name=file_name,
-                file_type=file_type,
                 folder_token=folder_token
             )
             print(f"[UPLOAD] 上传结果: {result}", flush=True)
 
             if result["success"]:
-                await state_manager.update_confirmation_status_by_id(confirmation_id, "completed")
+                await state_manager.update_confirmation_status(message_id, "completed")
                 await state_manager.log_operation(
                     chat_id=chat_id,
                     sender_id=operator_id,
@@ -500,7 +442,7 @@ class EventHandler:
                         )
                     )
             else:
-                await state_manager.update_confirmation_status_by_id(confirmation_id, "failed")
+                await state_manager.update_confirmation_status(message_id, "failed")
                 await state_manager.log_operation(
                     chat_id=chat_id,
                     sender_id=operator_id,
@@ -529,12 +471,11 @@ class EventHandler:
         folder_token = value.get("folder_token", "")
         folder_name = value.get("folder_name", "")
         message_id = value.get("message_id", "")
-        confirmation_id = self._get_confirmation_id(value)
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
 
-        if not await self._check_sender_permission(message_id, operator_id, confirmation_id):
+        if message_id and not await self._check_sender_permission(message_id, operator_id):
             print(f"[GO_BACK] 权限不足: operator={operator_id}", flush=True)
             operator_name = await self._get_cached_operator_name(operator_id)
             return card_builder.build_no_permission_card(operator_name)
@@ -547,7 +488,6 @@ class EventHandler:
                 file_name=file_name,
                 file_key=file_key,
                 message_id=message_id,
-                confirmation_id=confirmation_id,
                 parent_folder_token=folder_token,
                 parent_folder_name=folder_name,
                 folders=subfolders,
@@ -561,31 +501,27 @@ class EventHandler:
                 file_key=file_key,
                 folder_token=folder_token,
                 message_id=message_id,
-                confirmation_id=confirmation_id,
                 has_subfolders=False
             )
 
     async def _handle_cancel(self, value: Dict, operator_id: str, callback: Dict):
         """取消上传 - 只有发起人可以取消"""
         message_id = value.get("message_id", "")
-        confirmation_id = self._get_confirmation_id(value)
 
-        if message_id or confirmation_id:
-            is_permitted = await self._check_sender_permission(message_id, operator_id, confirmation_id)
+        if message_id:
+            is_permitted = await self._check_sender_permission(message_id, operator_id)
             if not is_permitted:
                 print(f"[CANCEL] 权限不足: operator={operator_id}", flush=True)
                 operator_name = await self._get_cached_operator_name(operator_id)
                 return card_builder.build_no_permission_card(operator_name)
 
-            confirmation = await self._get_confirmation(message_id, confirmation_id)
+            confirmation = await state_manager.get_confirmation(message_id)
             if confirmation and confirmation.get("status") in ["completed", "confirmed"]:
                 print(f"[CANCEL] 文件已上传，忽略取消操作", flush=True)
                 return card_builder.build_error_card(
                     file_name=confirmation.get("file_name", ""),
                     error_msg="文件已上传成功，无法取消"
                 )
-            if confirmation:
-                await state_manager.update_confirmation_status_by_id(confirmation["id"], "cancelled")
 
         print(f"[CANCEL] 取消上传: operator={operator_id}", flush=True)
         return card_builder.build_cancel_card()

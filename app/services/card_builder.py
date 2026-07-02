@@ -14,7 +14,6 @@ class CardBuilder:
         file_key: str,
         folder_token: str,
         message_id: str,
-        confirmation_id: int = None,
         has_subfolders: bool = True
     ) -> Dict[str, Any]:
         """
@@ -36,7 +35,6 @@ class CardBuilder:
                     "file_key": file_key,
                     "folder_token": folder_token,
                     "message_id": message_id,
-                    "confirmation_id": confirmation_id,
                     "file_name": file_name,
                     "sender_name": sender_name
                 }
@@ -52,7 +50,6 @@ class CardBuilder:
                 "folder_token": folder_token,
                 "folder_name": folder_name,
                 "message_id": message_id,
-                "confirmation_id": confirmation_id,
                 "file_name": file_name
             }
         })
@@ -61,7 +58,7 @@ class CardBuilder:
             "tag": "button",
             "text": {"tag": "plain_text", "content": "❌ 取消"},
             "type": "danger",
-            "value": {"action": "cancel", "message_id": message_id, "confirmation_id": confirmation_id}
+            "value": {"action": "cancel", "message_id": message_id}
         })
         
         return {
@@ -96,7 +93,6 @@ class CardBuilder:
         file_name: str,
         file_key: str,
         message_id: str,
-        confirmation_id: int,
         parent_folder_token: str,
         parent_folder_name: str,
         folders: List[Dict[str, str]],
@@ -121,7 +117,6 @@ class CardBuilder:
                 "folder_token": parent_folder_token,
                 "folder_name": parent_folder_name,
                 "message_id": message_id,
-                "confirmation_id": confirmation_id,
                 "file_name": file_name
             }
         })
@@ -138,7 +133,6 @@ class CardBuilder:
                     "folder_name": folder['name'],
                     "parent_folder_name": parent_folder_name,
                     "message_id": message_id,
-                    "confirmation_id": confirmation_id,
                     "file_name": file_name,
                     "sender_name": sender_name
                 }
@@ -155,7 +149,6 @@ class CardBuilder:
                 "folder_token": parent_folder_token,
                 "folder_name": parent_folder_name,
                 "message_id": message_id,
-                "confirmation_id": confirmation_id,
                 "file_name": file_name,
                 "sender_name": sender_name
             }
@@ -188,8 +181,7 @@ class CardBuilder:
         sender_name: str,
         file_key: str,
         folder_token: str,
-        message_id: str,
-        confirmation_id: int = None
+        message_id: str
     ) -> Dict[str, Any]:
         """
         步骤3: 确认上传卡片
@@ -233,7 +225,6 @@ class CardBuilder:
                                 "file_key": file_key,
                                 "folder_token": folder_token,
                                 "message_id": message_id,
-                                "confirmation_id": confirmation_id,
                                 "file_name": file_name
                             }
                         },
@@ -241,7 +232,7 @@ class CardBuilder:
                             "tag": "button",
                             "text": {"tag": "plain_text", "content": "❌ 取消"},
                             "type": "danger",
-                            "value": {"action": "cancel", "message_id": message_id, "confirmation_id": confirmation_id}
+                            "value": {"action": "cancel", "message_id": message_id}
                         }
                     ]
                 }
