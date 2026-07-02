@@ -215,7 +215,7 @@ mapping_service.add_hardcoded_mapping(
 |------|------|------|
 | `/` | GET | 根路径 |
 | `/health` | GET | 健康检查 |
-| `/api/events` | POST | 飞书事件回调（消息 + 卡片） |
+| `/api/events` | POST | 飞书事件回调（消息事件） |
 | `/api/card/callback` | POST | 飞书卡片按钮回调 |
 | `/api/logs?limit=100` | GET | 操作日志 |
 | `/api/mappings` | GET | 映射配置 |
@@ -290,30 +290,37 @@ if ref_message_id:
 # 正确做法：返回新卡片
 return JSONResponse(updated_card_json)
 
-# 错误做法：返回固定 code
-return JSONResponse({"code": 0})  # 这样卡片不会更新！
+# 无权限：返回 Toast 提示（仅点击者可见，卡片不变）
+return JSONResponse({
+    "toast": {
+        "type": "error",
+        "content": "你没有权限操作此卡片。只有发送命令的人可以操作。"
+    }
+})
+
+# 保持卡片不变
+return JSONResponse({})
 ```
 
 ### 5. 飞书事件重复发送
 
 **问题**: 飞书可能会重发同一条消息事件，导致机器人重复处理（出现两张相同的确认卡片）。
 
-**解决**: 添加消息去重逻辑：
+**解决**: 使用 SQLite 持久化去重，以 `message_id + file_key` 为幂等键：
 
 ```python
-class EventHandler:
-    def __init__(self):
-        self._processed_messages = set()
-    
-    async def handle_message_event(self, event):
-        message_id = message.get("message_id", "")
-        if message_id in self._processed_messages:
-            return  # 重复消息，跳过
-        self._processed_messages.add(message_id)
-        # ... 处理消息
+# state_manager.py
+async def create_confirmation(self, message_id, file_key, ...):
+    # 使用 UNIQUE 约束防止重复插入
+    cursor = await db.execute(
+        "INSERT OR IGNORE INTO confirmations (message_id, file_key, ...) VALUES (?, ?, ...)",
+        (message_id, file_key, ...)
+    )
+    if cursor.rowcount == 0:
+        return None  # 已存在，跳过
 ```
 
-**注意**: 生产环境建议使用 Redis 替代内存 Set，避免重启后去重失效。
+**卡片回调去重**: 使用 `message_id + file_key + action` 组合，5 秒内同一操作只处理一次，防止飞书重复回调或用户快速双击。
 
 ### 6. 机器人无法访问用户云盘文件夹
 
