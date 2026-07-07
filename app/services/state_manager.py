@@ -214,8 +214,20 @@ class StateManager:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("""
-                SELECT * FROM operation_logs 
-                ORDER BY timestamp DESC 
+                SELECT * FROM operation_logs
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (limit,))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_recent_confirmations(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """获取最近的归档确认记录"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM confirmations
+                ORDER BY created_at DESC
                 LIMIT ?
             """, (limit,))
             rows = await cursor.fetchall()
