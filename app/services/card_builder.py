@@ -164,7 +164,7 @@ class CardBuilder:
         return {
             "config": {"wide_screen_mode": True},
             "header": {
-                "title": {"tag": "plain_text", "content": f"📂 选择子文件夹 — {parent_folder_name}"},
+                "title": {"tag": "plain_text", "content": f"📂 当前文件夹 — {parent_folder_name}"},
                 "template": "blue"
             },
             "elements": [
@@ -172,7 +172,7 @@ class CardBuilder:
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**文件**：请选择保存位置：\n{file_name}"
+                        "content": f"**文件**：{file_name}\n请确认上传位置："
                     }
                 },
                 {"tag": "hr"},
