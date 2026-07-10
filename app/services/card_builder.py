@@ -42,7 +42,7 @@ class CardBuilder:
         
         actions.append({
             "tag": "button",
-            "text": {"tag": "plain_text", "content": "⬆️ 直接上传到根目录"},
+            "text": {"tag": "plain_text", "content": "⬆️ 直接保存到当前目录"},
             "type": "default",
             "value": {
                 "action": "confirm_upload",
@@ -172,7 +172,7 @@ class CardBuilder:
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**文件**：{file_name}\n请选择要上传到的子文件夹："
+                        "content": f"**文件**：请选择保存位置：\n{file_name}"
                     }
                 },
                 {"tag": "hr"},
