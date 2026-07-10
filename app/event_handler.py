@@ -328,6 +328,7 @@ class EventHandler:
         """处理浏览子文件夹"""
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
+        folder_name = value.get("folder_name", "")  # 根文件夹名，也作为 parent_path
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
@@ -347,12 +348,13 @@ class EventHandler:
         if not subfolders:
             confirm_card = card_builder.build_confirm_upload_card(
                 file_name=file_name,
-                folder_name="根目录",
+                folder_name=folder_name or "根目录",
                 parent_folder_name="",
                 sender_name=sender_name,
                 file_key=file_key,
                 folder_token=folder_token,
-                message_id=message_id
+                message_id=message_id,
+                parent_path=folder_name
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)
@@ -430,7 +432,8 @@ class EventHandler:
                 sender_name=sender_name,
                 file_key=file_key,
                 folder_token=folder_token,
-                message_id=message_id
+                message_id=message_id,
+                parent_path=parent_path
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=confirm_card)

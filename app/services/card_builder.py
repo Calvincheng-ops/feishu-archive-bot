@@ -36,10 +36,11 @@ class CardBuilder:
                     "folder_token": folder_token,
                     "message_id": message_id,
                     "file_name": file_name,
-                    "sender_name": sender_name
+                    "sender_name": sender_name,
+                    "folder_name": folder_name
                 }
             })
-        
+
         actions.append({
             "tag": "button",
             "text": {"tag": "plain_text", "content": "⬆️ 直接保存到当前目录"},
