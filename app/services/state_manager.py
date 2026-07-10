@@ -115,10 +115,45 @@ class StateManager:
         card_message_id: Optional[str] = None,
         source_message_id: Optional[str] = None
     ) -> Optional[int]:
-        """创建确认记录。若同一 message_id + file_key 已存在，则返回 None。"""
+        """
+        创建确认记录。
+
+        若同一 message_id + file_key 的记录状态为 cancelled/failed，
+        则重置为 pending（允许重新归档）；若状态为 pending/confirmed/completed
+        则返回 None（防重复）。
+        """
         async with aiosqlite.connect(self.db_path) as db:
+            # 先查现有记录状态
+            cursor = await db.execute(
+                "SELECT id, status FROM confirmations WHERE message_id = ? AND file_key = ?",
+                (message_id, file_key)
+            )
+            row = await cursor.fetchone()
+
+            if row:
+                existing_id, existing_status = row
+                if existing_status in ("cancelled", "failed"):
+                    # 重置状态为 pending，允许重新归档
+                    await db.execute(
+                        """UPDATE confirmations
+                           SET status = 'pending',
+                               file_name = ?, folder_token = ?,
+                               sender_id = ?, chat_id = ?,
+                               card_message_id = ?, source_message_id = ?,
+                               confirmed_at = NULL, completed_at = NULL,
+                               created_at = CURRENT_TIMESTAMP
+                           WHERE id = ?""",
+                        (file_name, folder_token, sender_id, chat_id,
+                         card_message_id, source_message_id, existing_id)
+                    )
+                    await db.commit()
+                    return existing_id
+                # pending / confirmed / completed → 不允许重复
+                return None
+
+            # 无现有记录 → 新建
             cursor = await db.execute("""
-                INSERT OR IGNORE INTO confirmations
+                INSERT INTO confirmations
                 (message_id, file_key, file_name, folder_token, sender_id, chat_id, card_message_id, source_message_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (message_id, file_key, file_name, folder_token, sender_id, chat_id, card_message_id, source_message_id))

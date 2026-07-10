@@ -102,7 +102,9 @@ class CardBuilder:
         sender_name: str,
         back_to_token: str = "",
         back_to_name: str = "",
-        parent_path: str = ""
+        parent_path: str = "",
+        grand_back_to_token: str = "",
+        grand_back_to_name: str = ""
     ) -> Dict[str, Any]:
         """
         步骤2: 子文件夹列表卡片
@@ -110,6 +112,7 @@ class CardBuilder:
         显示子文件夹供用户选择。
         back_to_token / back_to_name: 返回按钮的目标（上一级），为空则回到根目录。
         parent_path: 当前文件夹的完整路径（如 "项目A/设计稿/V2"），用于卡片展示。
+        grand_back_to_token / grand_back_to_name: 上上级文件夹（"返回"后再"返回"的目标）。
         """
         # 路径用于展示，空时回退到文件夹名
         path_display = parent_path or parent_folder_name
@@ -152,7 +155,9 @@ class CardBuilder:
                     "message_id": message_id,
                     "file_name": file_name,
                     "sender_name": sender_name,
-                    "parent_path": child_path
+                    "parent_path": child_path,
+                    "back_to_token": back_to_token,
+                    "back_to_name": back_to_name
                 }
             })
 
@@ -171,7 +176,9 @@ class CardBuilder:
                 "message_id": message_id,
                 "file_name": file_name,
                 "sender_name": sender_name,
-                "parent_path": back_path
+                "parent_path": back_path,
+                "back_to_token": grand_back_to_token,
+                "back_to_name": grand_back_to_name
             }
         })
         
@@ -249,6 +256,7 @@ class CardBuilder:
                                 "action": "do_upload",
                                 "file_key": file_key,
                                 "folder_token": folder_token,
+                                "folder_name": folder_name,
                                 "message_id": message_id,
                                 "file_name": file_name,
                                 "sender_name": sender_name,

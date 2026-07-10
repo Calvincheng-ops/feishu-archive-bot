@@ -393,6 +393,8 @@ class EventHandler:
         parent_folder_name = value.get("parent_folder_name", "")
         parent_folder_token = value.get("parent_folder_token", "")  # 上一级 token（用于返回）
         parent_path = value.get("parent_path", "")  # 当前文件夹的完整路径
+        grand_back_to_token = value.get("back_to_token", "")  # 上上级 token
+        grand_back_to_name = value.get("back_to_name", "")    # 上上级名称
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
@@ -418,7 +420,9 @@ class EventHandler:
                 sender_name=sender_name,
                 back_to_token=parent_folder_token,
                 back_to_name=parent_folder_name,
-                parent_path=parent_path
+                parent_path=parent_path,
+                grand_back_to_token=grand_back_to_token,
+                grand_back_to_name=grand_back_to_name
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=new_folder_card)
@@ -645,6 +649,8 @@ class EventHandler:
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
         parent_path = value.get("parent_path", "")  # 返回后的文件夹完整路径
+        grand_back_to_token = value.get("back_to_token", "")  # 返回后再返回的目标 token
+        grand_back_to_name = value.get("back_to_name", "")    # 返回后再返回的目标名称
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查
@@ -670,7 +676,9 @@ class EventHandler:
                         parent_folder_name=folder_name,
                         folders=subfolders,
                         sender_name=sender_name,
-                        parent_path=parent_path
+                        parent_path=parent_path,
+                        back_to_token=grand_back_to_token,
+                        back_to_name=grand_back_to_name
                     )
                 )
         else:
@@ -682,8 +690,10 @@ class EventHandler:
                     root_name = await lark_client.get_folder_name(mapping.folder_token)
                     if not root_name:
                         root_name = mapping.folder_name
+                    root_token = mapping.folder_token
                 else:
                     root_name = folder_name
+                    root_token = folder_token
                 await lark_client.send_card(
                     chat_id=chat_id,
                     card_json=card_builder.build_file_detected_card(
@@ -691,7 +701,7 @@ class EventHandler:
                         folder_name=root_name,
                         sender_name=sender_name,
                         file_key=file_key,
-                        folder_token=folder_token,
+                        folder_token=root_token,
                         message_id=message_id,
                         has_subfolders=False
                     )
