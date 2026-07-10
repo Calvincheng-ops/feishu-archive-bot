@@ -375,7 +375,8 @@ class EventHandler:
                 parent_folder_token=folder_token,
                 parent_folder_name=parent_name,
                 folders=subfolders,
-                sender_name=sender_name
+                sender_name=sender_name,
+                parent_path=parent_name
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=folder_list_card)
@@ -389,6 +390,7 @@ class EventHandler:
         folder_name = value.get("folder_name", "")
         parent_folder_name = value.get("parent_folder_name", "")
         parent_folder_token = value.get("parent_folder_token", "")  # 上一级 token（用于返回）
+        parent_path = value.get("parent_path", "")  # 当前文件夹的完整路径
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
@@ -413,7 +415,8 @@ class EventHandler:
                 folders=subfolders,
                 sender_name=sender_name,
                 back_to_token=parent_folder_token,
-                back_to_name=parent_folder_name
+                back_to_name=parent_folder_name,
+                parent_path=parent_path
             )
             if chat_id:
                 await lark_client.send_card(chat_id=chat_id, card_json=new_folder_card)
@@ -446,6 +449,7 @@ class EventHandler:
 
         folder_token = value.get("folder_token", "")
         folder_name = value.get("folder_name", "")
+        parent_path = value.get("parent_path", "")  # 文件夹完整路径
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")  # 从卡片 value 取发送人
         chat_id = self._get_chat_id_from_callback(callback)
@@ -457,7 +461,8 @@ class EventHandler:
             sender_name=sender_name,
             file_key=file_key,
             folder_token=folder_token,
-            message_id=message_id
+            message_id=message_id,
+            parent_path=parent_path
         )
 
         if chat_id:
@@ -470,6 +475,7 @@ class EventHandler:
         file_key = value.get("file_key", "")
         folder_token = value.get("folder_token", "")
         folder_name = value.get("folder_name", "")  # 选中的子文件夹名
+        parent_path = value.get("parent_path", "")  # 文件夹完整路径
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         chat_id = self._get_chat_id_from_callback(callback)
@@ -580,7 +586,8 @@ class EventHandler:
                             file_name=file_name,
                             folder_name=display_folder,
                             file_url=file_url,
-                            folder_url=folder_url
+                            folder_url=folder_url,
+                            parent_path=parent_path
                         )
                     )
             else:
@@ -632,6 +639,7 @@ class EventHandler:
         message_id = value.get("message_id", "")
         file_name = value.get("file_name", "")
         sender_name = value.get("sender_name", "")
+        parent_path = value.get("parent_path", "")  # 返回后的文件夹完整路径
         chat_id = self._get_chat_id_from_callback(callback)
 
         # 权限检查
@@ -656,7 +664,8 @@ class EventHandler:
                         parent_folder_token=folder_token,
                         parent_folder_name=folder_name,
                         folders=subfolders,
-                        sender_name=sender_name
+                        sender_name=sender_name,
+                        parent_path=parent_path
                     )
                 )
         else:

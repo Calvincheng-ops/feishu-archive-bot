@@ -51,7 +51,8 @@ class CardBuilder:
                 "folder_name": folder_name,
                 "message_id": message_id,
                 "file_name": file_name,
-                "sender_name": sender_name
+                "sender_name": sender_name,
+                "parent_path": folder_name
             }
         })
 
@@ -99,14 +100,21 @@ class CardBuilder:
         folders: List[Dict[str, str]],
         sender_name: str,
         back_to_token: str = "",
-        back_to_name: str = ""
+        back_to_name: str = "",
+        parent_path: str = ""
     ) -> Dict[str, Any]:
         """
         步骤2: 子文件夹列表卡片
 
         显示子文件夹供用户选择。
         back_to_token / back_to_name: 返回按钮的目标（上一级），为空则回到根目录。
+        parent_path: 当前文件夹的完整路径（如 "项目A/设计稿/V2"），用于卡片展示。
         """
+        # 路径用于展示，空时回退到文件夹名
+        path_display = parent_path or parent_folder_name
+        # 计算"返回"后的路径：去掉最后一级
+        back_path = parent_path.rsplit("/", 1)[0] if "/" in parent_path else ""
+
         actions = []
 
         # 添加"上传到当前文件夹"按钮
@@ -121,11 +129,14 @@ class CardBuilder:
                 "folder_name": parent_folder_name,
                 "message_id": message_id,
                 "file_name": file_name,
-                "sender_name": sender_name
+                "sender_name": sender_name,
+                "parent_path": parent_path
             }
         })
 
         for folder in folders[:10]:  # 最多显示10个
+            # 进入子文件夹后的完整路径
+            child_path = f"{parent_path}/{folder['name']}" if parent_path else f"{parent_folder_name}/{folder['name']}"
             actions.append({
                 "tag": "button",
                 "text": {"tag": "plain_text", "content": f"📁 {folder['name']}"},
@@ -139,7 +150,8 @@ class CardBuilder:
                     "parent_folder_token": parent_folder_token,
                     "message_id": message_id,
                     "file_name": file_name,
-                    "sender_name": sender_name
+                    "sender_name": sender_name,
+                    "parent_path": child_path
                 }
             })
 
@@ -157,7 +169,8 @@ class CardBuilder:
                 "folder_name": go_back_label,
                 "message_id": message_id,
                 "file_name": file_name,
-                "sender_name": sender_name
+                "sender_name": sender_name,
+                "parent_path": back_path
             }
         })
         
@@ -172,7 +185,7 @@ class CardBuilder:
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**文件**：{file_name}\n请确认上传位置："
+                        "content": f"**文件**：{file_name}\n请确认上传位置：{path_display}"
                     }
                 },
                 {"tag": "hr"},
@@ -188,14 +201,18 @@ class CardBuilder:
         sender_name: str,
         file_key: str,
         folder_token: str,
-        message_id: str
+        message_id: str,
+        parent_path: str = ""
     ) -> Dict[str, Any]:
         """
         步骤3: 确认上传卡片
-        
+
         显示完整路径，用户确认后上传
+        parent_path: 完整文件夹路径（如 "项目A/设计稿/V2"），为空时回退到 folder_name
         """
-        full_path = f"{parent_folder_name} / {folder_name}" if parent_folder_name and parent_folder_name != folder_name else folder_name
+        full_path = parent_path or (
+            f"{parent_folder_name} / {folder_name}" if parent_folder_name and parent_folder_name != folder_name else folder_name
+        )
         
         return {
             "config": {"wide_screen_mode": True},
@@ -233,7 +250,8 @@ class CardBuilder:
                                 "folder_token": folder_token,
                                 "message_id": message_id,
                                 "file_name": file_name,
-                                "sender_name": sender_name
+                                "sender_name": sender_name,
+                                "parent_path": parent_path
                             }
                         },
                         {
@@ -272,7 +290,8 @@ class CardBuilder:
         file_name: str,
         folder_name: str,
         file_url: str = "",
-        folder_url: str = ""
+        folder_url: str = "",
+        parent_path: str = ""
     ) -> Dict[str, Any]:
         """上传成功卡片 — 显示文件名、目标文件夹、文件链接和文件夹链接"""
         content = (
@@ -280,6 +299,8 @@ class CardBuilder:
             f"**文件名**：{file_name}\n"
             f"**目标文件夹**：{folder_name}"
         )
+        if parent_path:
+            content += f"\n**文件夹路径**：{parent_path}"
         if file_url:
             content += f"\n\n📎 [点击查看文件]({file_url})"
         if folder_url:
