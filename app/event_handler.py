@@ -530,7 +530,8 @@ class EventHandler:
             file_name=file_name,
             folder_token=folder_token,
             folder_name=folder_name,
-            operator_id=operator_id
+            operator_id=operator_id,
+            parent_path=parent_path
         ))
 
         return self._card(card_builder.build_uploading_card(file_name))
@@ -544,7 +545,8 @@ class EventHandler:
         file_name: str,
         folder_token: str,
         folder_name: str,
-        operator_id: str
+        operator_id: str,
+        parent_path: str = ""
     ):
         """后台执行文件上传"""
         try:
