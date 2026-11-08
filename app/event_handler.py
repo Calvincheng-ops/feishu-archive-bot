@@ -40,10 +40,15 @@ class EventHandler:
 
             # 检查是否被 @
             mentions = message.get("mentions", [])
+            print(f"[EVENT] mentions数据: {json.dumps(mentions, ensure_ascii=False)}", flush=True)
+            
+            # 只响应@自己这个机器人，不响应@其他机器人
+            from app.config import settings
+            bot_app_id = settings.bot_app_id  # cli_a94a184fb6b91bb4
             bot_mentioned = any(
-                m.get("mentioned_type") == "bot" or
-                m.get("id", {}).get("open_id", "") == "bot" or
-                m.get("id", {}).get("app_id", "") == "bot"
+                m.get("id", {}).get("app_id", "") == bot_app_id or
+                m.get("id", {}).get("open_id", "") == bot_app_id or
+                (m.get("name", "").lower() in ["文件归档助手", "archive bot"] and m.get("mentioned_type") == "bot")
                 for m in mentions
             )
 

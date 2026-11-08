@@ -1,0 +1,15 @@
+[Unit]
+Description=Feishu Archive Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/feishu-archive-bot
+ExecStart=/usr/local/lib/hermes-agent/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info
+Restart=always
+RestartSec=3
+EnvironmentFile=/root/feishu-archive-bot/.env
+
+[Install]
+WantedBy=multi-user.target
